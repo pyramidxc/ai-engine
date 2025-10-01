@@ -1,0 +1,9 @@
+{
+  "hostname": "web-server-01.example.com",
+  "open_ports": [22, 80, 443, 3306],
+  "vulnerabilities": [
+    "CVE-2023-12345: SQL Injection in web application",
+    "CVE-2023-23456: Outdated SSH version with known exploits",
+    "CVE-2023-34567: MySQL running with default credentials"
+  ]
+}
