@@ -1,98 +1,62 @@
-import os
-import json
+"""
+FastAPI application entry point.
+Defines API routes and handles HTTP requests.
+"""
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from dotenv import load_dotenv
-import litellm
+from app.config import settings
+from app.models import InputHost, AttackPathResponse
+from app.services import AttackPathAnalyzer
 
-# Load environment variables
-load_dotenv()
+# Initialize FastAPI app
+app = FastAPI(
+    title=settings.API_TITLE,
+    version=settings.API_VERSION,
+    description="AI-powered attack path analysis engine"
+)
 
-app = FastAPI(title="Attack Path Engine")
+# Initialize services
+analyzer = AttackPathAnalyzer()
 
-# LLM Configuration
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
-LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-
-class InputHost(BaseModel):
-    hostname: str
-    open_ports: list[int] = []
-    vulnerabilities: list[str] = []
-
-class AttackPathResponse(BaseModel):
-    hostname: str
-    attack_path: list[str]
-    risk_level: str
-    recommendations: list[str]
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """
+    Health check endpoint.
+    Returns service status and configuration info.
+    """
+    return {
+        "status": "ok",
+        "version": settings.API_VERSION,
+        "model": settings.LLM_MODEL
+    }
+
 
 @app.post("/attack-path", response_model=AttackPathResponse)
 async def attack_path(host: InputHost):
     """
-    Generate an attack path analysis based on host exposure data.
-    Uses LLM to analyze vulnerabilities and open ports to suggest potential attack vectors.
+    Generate attack path analysis based on host exposure data.
+    
+    Uses AI to analyze vulnerabilities and open ports to suggest
+    potential attack vectors, risk levels, and security recommendations.
+    
+    Args:
+        host: Host data including hostname, ports, and vulnerabilities
+        
+    Returns:
+        Attack path analysis with steps, risk level, and recommendations
+        
+    Raises:
+        HTTPException: If analysis fails
     """
     try:
-        # Build the prompt for the LLM
-        prompt = f"""You are a cybersecurity expert analyzing a host for potential attack paths.
-
-Host Information:
-- Hostname: {host.hostname}
-- Open Ports: {', '.join(map(str, host.open_ports)) if host.open_ports else 'None detected'}
-- Known Vulnerabilities: {', '.join(host.vulnerabilities) if host.vulnerabilities else 'None detected'}
-
-Based on this information, provide:
-1. A step-by-step attack path that an attacker might follow
-2. The overall risk level (Critical, High, Medium, Low)
-3. Security recommendations to mitigate the risks
-
-Format your response as JSON with the following structure:
-{{
-    "attack_path": ["step 1", "step 2", "step 3", ...],
-    "risk_level": "High|Medium|Low|Critical",
-    "recommendations": ["recommendation 1", "recommendation 2", ...]
-}}
-
-Be specific and technical. Each attack path step should describe what an attacker would do.
-"""
-
-        # Call LLM using litellm
-        response = await litellm.acompletion(
-            model=LLM_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a cybersecurity expert specializing in attack path analysis and penetration testing."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=LLM_TEMPERATURE,
-            response_format={"type": "json_object"}
-        )
-
-        # Extract and parse the response
-        llm_response = response.choices[0].message.content
-        analysis = json.loads(llm_response)
-
-        # Build the response
-        return AttackPathResponse(
-            hostname=host.hostname,
-            attack_path=analysis.get("attack_path", []),
-            risk_level=analysis.get("risk_level", "Unknown"),
-            recommendations=analysis.get("recommendations", [])
-        )
-
-    except json.JSONDecodeError as e:
+        return await analyzer.analyze(host)
+    
+    except ValueError as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to parse LLM response: {str(e)}"
+            status_code=422,
+            detail=f"Invalid analysis data: {str(e)}"
         )
+    
     except Exception as e:
         raise HTTPException(
             status_code=500,

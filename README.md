@@ -1,11 +1,13 @@
-# AI Attack Path Engine
+# AI Attack Path Engine 🔒
 
 FastAPI microservice that converts host exposure data into a normalized attack-path JSON using LLMs.
 
-## Features
+## ✨ Features
 
 - 🤖 **LLM-Powered Analysis**: Uses AI to generate realistic attack paths
 - 🔄 **Multi-Provider Support**: Works with OpenAI, Anthropic, Google Gemini, Azure, and 100+ providers via LiteLLM
+- 🏗️ **Clean Architecture**: Professional separation of concerns for maintainability
+- 🚀 **Production-Ready**: Designed for scalability and async migration
 - 🎯 **Risk Assessment**: Automatic risk level classification (Critical, High, Medium, Low)
 - 🛡️ **Security Recommendations**: AI-generated mitigation strategies
 - ⚡ **Fast & Modern**: Built with FastAPI and async support
@@ -121,6 +123,8 @@ python test_engine.py
 | Document | Description |
 |----------|-------------|
 | **[Quick Start Guide](docs/QUICKSTART.md)** | ⚡ Fast setup and basic usage |
+| **[Architecture](docs/ARCHITECTURE.md)** | 🏛️ Clean architecture implementation details |
+| **[Refactoring Summary](docs/REFACTORING_SUMMARY.md)** | 📊 Migration from monolithic to layered |
 | **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** | 🚀 Local vs Docker - choosing the right mode |
 | **[Usage Guide](docs/USAGE.md)** | 📘 Complete API documentation and examples |
 | **[Implementation Summary](docs/IMPLEMENTATION_SUMMARY.md)** | 🔧 Technical architecture and design |
@@ -137,9 +141,20 @@ python test_engine.py
 ```bash
 ai-engine/
 ├── app/
-│   └── main.py                    # FastAPI application & LLM integration
+│   ├── main.py                    # FastAPI routes (Presentation Layer)
+│   ├── config.py                  # Configuration management
+│   ├── models/                    # Data models (Data Layer)
+│   │   ├── host.py               # Input models
+│   │   └── analysis.py           # Output models
+│   ├── services/                  # Business logic (Business Layer)
+│   │   ├── analyzer.py           # Attack path analysis orchestration
+│   │   └── llm_client.py         # LLM API client
+│   └── core/                      # Domain logic (Core Layer)
+│       └── prompts.py            # Prompt building logic
 ├── docs/                          # 📚 Documentation
 │   ├── QUICKSTART.md             # Quick reference guide
+│   ├── ARCHITECTURE.md           # Clean architecture details
+│   ├── REFACTORING_SUMMARY.md    # Refactoring documentation
 │   ├── DEPLOYMENT_GUIDE.md       # Local vs Docker guide
 │   ├── USAGE.md                  # Comprehensive usage
 │   └── IMPLEMENTATION_SUMMARY.md # Technical details
@@ -151,6 +166,25 @@ ai-engine/
 ├── test_engine.py                # Test script
 └── example_request.json          # Sample API request
 ```
+
+### Architecture Highlights
+
+The codebase follows **clean architecture** principles:
+
+- **Presentation Layer** (`main.py`): HTTP routing only (~45 lines)
+- **Business Logic** (`services/`): Orchestration and business rules
+- **Core Domain** (`core/`): Domain-specific logic (prompts)
+- **Data Layer** (`models/`): Data structures and validation
+- **Infrastructure** (`config.py`): Configuration and external dependencies
+
+**Benefits**:
+
+- ✅ Easy to test (mockable components)
+- ✅ Easy to maintain (single responsibility per file)
+- ✅ Easy to extend (open/closed principle)
+- ✅ Ready for async migration (clear interfaces)
+
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design documentation.
 
 ## 🛠️ Tech Stack
 
