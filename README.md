@@ -1,15 +1,15 @@
 # AI Attack Path Engine 🔒
 
-FastAPI microservice that converts host exposure data into a normalized attack-path JSON using LLMs.
+FastAPI microservice that generates realistic attack paths from host exposure data collected by external systems. Uses AI to transform vulnerability and port scan data into step-by-step attack sequences.
 
 ## ✨ Features
 
-- 🤖 **LLM-Powered Analysis**: Uses AI to generate realistic attack paths
-- 🔄 **Multi-Provider Support**: Works with OpenAI, Anthropic, Google Gemini, Azure, and 100+ providers via LiteLLM
+- 🤖 **LLM-Powered Generation**: Uses AI to generate realistic, sequential attack paths
+- � **Data-Driven**: Works with data from external collectors (scanners, vulnerability tools)
+- �🔄 **Multi-Provider Support**: Works with OpenAI, Anthropic, Google Gemini, Azure, and 100+ providers via LiteLLM
 - 🏗️ **Clean Architecture**: Professional separation of concerns for maintainability
 - 🚀 **Production-Ready**: Designed for scalability and async migration
 - 🎯 **Risk Assessment**: Automatic risk level classification (Critical, High, Medium, Low)
-- 🛡️ **Security Recommendations**: AI-generated mitigation strategies
 - ⚡ **Fast & Modern**: Built with FastAPI and async support
 
 ---
@@ -103,6 +103,23 @@ uvicorn app.main:app --reload
 curl -X POST http://localhost:8000/attack-path \
   -H "Content-Type: application/json" \
   -d @example_request.json
+```
+
+**Example Request Format:**
+```json
+{
+  "platform": "Linux",
+  "version_os": "Ubuntu 20.04.3 LTS",
+  "open_ports": [22, 80, 443, 3306],
+  "services": [
+    "OpenSSH 8.2p1 on port 22",
+    "Apache httpd 2.4.41 on port 80",
+    "MySQL 5.7.33 on port 3306"
+  ],
+  "vulnerabilities": [
+    "CVE-2023-12345: SQL Injection"
+  ]
+}
 ```
 
 Or run the test script:

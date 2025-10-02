@@ -4,6 +4,8 @@
 
 This document describes the clean architecture implementation of the Attack Path Engine, following modern Python best practices and separation of concerns principles.
 
+The system generates realistic attack sequences from vulnerability and exposure data collected by external systems (scanners, vulnerability assessment tools, etc.).
+
 ## Architecture Principles
 
 ### 1. **Separation of Concerns**
@@ -66,6 +68,7 @@ app/
 ```python
 @app.post("/attack-path", response_model=AttackPathResponse)
 async def attack_path(host: InputHost):
+    """Generate attack path from collector data"""
     try:
         return await analyzer.analyze(host)
     except ValueError as e:
@@ -76,13 +79,14 @@ async def attack_path(host: InputHost):
 
 #### `services/analyzer.py`
 
-**Purpose**: Orchestrate the attack path analysis workflow
+**Purpose**: Orchestrate the attack path generation workflow
 
 **Responsibilities**:
 
 - Coordinate between prompt building and LLM calls
-- Business logic validation
-- Transform LLM responses into domain objects
+- Transform collector data into prompts
+- Transform LLM responses into structured attack paths
+- Validate generated attack sequences
 
 **Dependencies**: LLMClient, PromptBuilder, Models
 
@@ -107,9 +111,10 @@ async def attack_path(host: InputHost):
 
 **Responsibilities**:
 
-- Build structured prompts from domain data
-- Maintain prompt templates
-- Encapsulate domain knowledge
+- Build structured prompts from collector data
+- Maintain prompt templates for attack path generation
+- Encapsulate offensive security domain knowledge
+- Define attack path generation guidelines
 
 **Dependencies**: Models only (no external services)
 
@@ -121,9 +126,9 @@ async def attack_path(host: InputHost):
 
 **Responsibilities**:
 
-- Validate host input data
-- Provide type safety
-- Document expected fields
+- Validate host data from external collectors
+- Provide type safety for vulnerability and exposure data
+- Document expected fields from collector systems
 
 #### `models/analysis.py`
 
@@ -131,9 +136,9 @@ async def attack_path(host: InputHost):
 
 **Responsibilities**:
 
-- Structure analysis results
-- Enforce response format
-- Provide API contract
+- Structure generated attack paths
+- Enforce response format (attack sequence + risk level)
+- Provide API contract for generated paths
 
 ### 5. Configuration (`config.py`)
 
@@ -163,16 +168,17 @@ async def attack_path(host: InputHost):
 
 Each class has one reason to change:
 
-- `PromptBuilder`: Prompts change
+- `PromptBuilder`: Attack path generation logic changes
 - `LLMClient`: LLM API changes
-- `AttackPathAnalyzer`: Business logic changes
+- `AttackPathAnalyzer`: Generation workflow changes
 - Route handlers: API contract changes
 
 ### 3. **Open/Closed Principle**
 
 Easy to extend without modifying existing code:
 
-- Add new analysis types by creating new analyzers
+- Add new generation strategies by creating new analyzers
+- Add remediation generation in Phase 2 without touching existing code
 - Add new LLM providers by configuring LiteLLM
 - Add new prompt strategies by extending PromptBuilder
 
@@ -230,11 +236,13 @@ async def test_analyzer():
 
 Easy to add features:
 
-- New analysis types (compliance, threat modeling)
+- Phase 2: Remediation recommendations
+- Phase 2: Compliance mapping
+- Phase 2: Threat intelligence integration
 - Multiple LLM providers
-- Caching layer
+- Caching layer for similar attack paths
 - Rate limiting
-- Background processing
+- Background processing with queues
 
 ### 4. **Readability**
 
@@ -315,13 +323,20 @@ class AttackPathAnalyzer:
 
 ## Next Steps
 
+### Phase 1 (Current - Attack Path Generation)
 1. **Add Unit Tests**: Test each component in isolation
 2. **Add Integration Tests**: Test full flow with real LLM
 3. **Add Caching**: Cache LLM responses for identical inputs
-4. **Add Monitoring**: Log analysis requests and performance
+4. **Add Monitoring**: Log generation requests and performance
 5. **Implement Async**: Add SQS + Lambda architecture
 6. **Add Authentication**: Secure the API endpoints
 7. **Add Rate Limiting**: Prevent abuse
+
+### Phase 2 (Future - Remediation & Intelligence)
+1. **Remediation Generation**: Add security recommendations
+2. **Compliance Mapping**: Map to security frameworks
+3. **Threat Intelligence**: Integrate external threat feeds
+4. **Attack Simulation**: Add playbook generation
 
 ## Conclusion
 

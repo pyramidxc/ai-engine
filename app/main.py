@@ -11,7 +11,7 @@ from app.services import AttackPathAnalyzer
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
-    description="AI-powered attack path analysis engine"
+    description="AI-powered attack path engine - transforms vulnerability data into attack sequences"
 )
 
 # Initialize services
@@ -34,19 +34,20 @@ def health():
 @app.post("/attack-path", response_model=AttackPathResponse)
 async def attack_path(host: InputHost):
     """
-    Generate attack path analysis based on host exposure data.
+    Generate realistic attack path from host exposure data.
     
-    Uses AI to analyze vulnerabilities and open ports to suggest
-    potential attack vectors, risk levels, and security recommendations.
+    Takes vulnerability and port scan data from external collectors
+    and generates a step-by-step attack sequence showing how an
+    attacker would exploit the identified vulnerabilities.
     
     Args:
-        host: Host data including hostname, ports, and vulnerabilities
+        host: Host data from external collector (hostname, ports, vulnerabilities)
         
     Returns:
-        Attack path analysis with steps, risk level, and recommendations
+        Generated attack path with sequential steps and risk assessment
         
     Raises:
-        HTTPException: If analysis fails
+        HTTPException: If generation fails
     """
     try:
         return await analyzer.analyze(host)

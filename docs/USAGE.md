@@ -2,15 +2,16 @@
 
 ## Overview
 
-The Attack Path Engine is a FastAPI microservice that analyzes host exposure data and generates potential attack paths using LLM (Large Language Model) analysis. It uses LiteLLM to support multiple AI providers without code changes.
+The Attack Path Engine is a FastAPI microservice that generates realistic attack paths from host exposure data collected by external systems. It uses AI (via LiteLLM) to transform vulnerability and port scan data into sequential attack scenarios that demonstrate how an attacker would exploit identified weaknesses.
 
 ## Features
 
 - **Multi-Provider LLM Support**: Use OpenAI, Anthropic, Google Gemini, Azure, and more
-- **Attack Path Generation**: AI-powered analysis of potential security vulnerabilities
-- **Risk Assessment**: Automatic risk level classification
-- **Security Recommendations**: Actionable mitigation strategies
-- **JSON API**: Easy integration with other security tools
+- **Realistic Attack Path Generation**: AI-powered sequences showing attacker progression
+- **Risk Assessment**: Automatic risk level classification (Critical, High, Medium, Low)
+- **Collector Integration**: Designed to work with external vulnerability scanners and assessment tools
+- **JSON API**: Easy integration with security platforms and orchestration systems
+- **Phase 2 Ready**: Architecture supports future remediation and compliance features
 
 ## Setup
 
@@ -73,18 +74,25 @@ Check if the service is running.
 
 **POST** `/attack-path`
 
-Analyze a host and generate potential attack paths.
+Generate a realistic attack path from host exposure data collected by external systems.
 
-**Request Body:**
+**Request Body (from external collector):**
 
 ```json
 {
-  "hostname": "web-server-01.example.com",
+  "platform": "Linux",
+  "version_os": "Ubuntu 20.04.3 LTS",
   "open_ports": [22, 80, 443, 3306],
+  "services": [
+    "OpenSSH 8.2p1 on port 22",
+    "Apache httpd 2.4.41 on port 80",
+    "Apache httpd 2.4.41 (SSL) on port 443",
+    "MySQL 5.7.33 on port 3306"
+  ],
   "vulnerabilities": [
     "CVE-2023-12345: SQL Injection in web application",
-    "CVE-2023-23456: Outdated SSH version",
-    "CVE-2023-34567: MySQL with default credentials"
+    "CVE-2023-23456: Outdated SSH version with known exploits",
+    "CVE-2023-34567: MySQL running with default credentials"
   ]
 }
 ```
@@ -93,28 +101,18 @@ Analyze a host and generate potential attack paths.
 
 ```json
 {
-  "hostname": "web-server-01.example.com",
+  "platform": "Linux",
+  "version_os": "Ubuntu 20.04.3 LTS",
   "attack_path": [
-    "1. Scan open ports and identify MySQL on port 3306",
-    "2. Attempt default credential login to MySQL database",
-    "3. Extract sensitive data and database credentials",
-    "4. Use extracted credentials to access web application",
-    "5. Exploit SQL injection vulnerability to gain admin access",
-    "6. Upload web shell through compromised admin panel",
-    "7. Escalate privileges using local exploits",
-    "8. Establish persistent SSH access on port 22"
+    "Reconnaissance: Active network scanning using nmap (MITRE T1595.002) identifies Linux Ubuntu server with SSH, Apache, and MySQL services exposed",
+    "Weaponization: Prepare SQL injection exploit framework targeting Apache/MySQL stack. Tool: sqlmap with custom tamper scripts",
+    "Delivery: Direct HTTP POST exploitation to vulnerable /login.php endpoint (MITRE T1190 - Exploit Public-Facing Application)",
+    "Exploitation: SQL injection successful - UNION-based attack extracts MySQL credentials. Payload: admin' UNION SELECT user,password FROM mysql.user--",
+    "Installation: Deploy persistence mechanism via MySQL UDF backdoor (MITRE T1546). Command: CREATE FUNCTION sys_exec RETURNS int SONAME 'lib_mysqludf_sys.so'",
+    "Command and Control: Establish reverse HTTPS shell using Metasploit (MITRE T1071.001). Listener on attacker.com:443 with SSL encryption",
+    "Actions on Objectives: Credential dumping from /etc/shadow (T1003.008), lateral movement via SSH keys (T1021.004), database exfiltration (T1048.002)"
   ],
-  "risk_level": "Critical",
-  "recommendations": [
-    "Immediately change MySQL default credentials and disable remote access",
-    "Update SSH to latest version and implement key-based authentication only",
-    "Patch SQL injection vulnerability in web application",
-    "Implement Web Application Firewall (WAF) to protect against injection attacks",
-    "Close unnecessary ports - MySQL should not be exposed to internet",
-    "Enable database query logging and monitoring for suspicious activity",
-    "Implement multi-factor authentication for administrative access",
-    "Conduct regular security audits and penetration testing"
-  ]
+  "risk_level": "Critical"
 }
 ```
 
@@ -144,10 +142,15 @@ client = httpx.Client(base_url="http://localhost:8000")
 response = client.get("/health")
 print(response.json())
 
-# Analyze a host
+# Generate attack path
 host_data = {
-    "hostname": "db-server-02.internal",
+    "platform": "Linux",
+    "version_os": "Debian 11 (Bullseye)",
     "open_ports": [22, 5432],
+    "services": [
+        "OpenSSH 8.4p1 on port 22",
+        "PostgreSQL 13.7 on port 5432"
+    ],
     "vulnerabilities": [
         "CVE-2023-45678: PostgreSQL privilege escalation"
     ]
@@ -156,14 +159,11 @@ host_data = {
 response = client.post("/attack-path", json=host_data)
 result = response.json()
 
+print(f"Platform: {result['platform']} {result['version_os']}")
 print(f"Risk Level: {result['risk_level']}")
 print(f"\nAttack Path:")
 for step in result['attack_path']:
-    print(f"  - {step}")
-
-print(f"\nRecommendations:")
-for rec in result['recommendations']:
-    print(f"  - {rec}")
+    print(f"  • {step}")
 ```
 
 ### Using JavaScript/TypeScript
@@ -175,16 +175,23 @@ const response = await fetch('http://localhost:8000/attack-path', {
     'Content-Type': 'application/json',
   },
   body: JSON.stringify({
-    hostname: 'api-server.example.com',
+    platform: 'Linux',
+    version_os: 'CentOS 8',
     open_ports: [443, 8080],
+    services: [
+      'nginx 1.18.0 on port 443',
+      'Tomcat 9.0.54 on port 8080'
+    ],
     vulnerabilities: [
-      'CVE-2023-99999: Unpatched API gateway'
+      'CVE-2023-99999: Unpatched API gateway vulnerability'
     ]
   })
 });
 
 const result = await response.json();
-console.log(result);
+console.log(`Platform: ${result.platform} ${result.version_os}`);
+console.log(`Risk: ${result.risk_level}`);
+console.log('Attack Path:', result.attack_path);
 ```
 
 ## LiteLLM Provider Support
@@ -229,10 +236,11 @@ Error response format:
 
 1. **API Key Security**: Never commit API keys to version control
 2. **Rate Limiting**: Implement rate limiting for production use
-3. **Caching**: Cache results for identical requests to save costs
-4. **Model Selection**: Use `gpt-4o-mini` for cost-effective analysis, `gpt-4o` or `claude-3-5-sonnet` for more detailed analysis
-5. **Temperature**: Lower temperature (0.3-0.5) for consistent results, higher (0.7-1.0) for creative analysis
-6. **Monitoring**: Log all requests and responses for audit trails
+3. **Caching**: Cache results for similar vulnerability patterns to save costs
+4. **Model Selection**: Use `gpt-4o-mini` for cost-effective generation, `gpt-4o` or `claude-3-5-sonnet` for more sophisticated attack sequences
+5. **Temperature**: Lower temperature (0.3-0.5) for consistent attack paths, higher (0.7-1.0) for varied scenarios
+6. **Monitoring**: Log all generation requests and responses for audit trails
+7. **Collector Integration**: Ensure data format from collectors matches InputHost schema
 
 ## Development
 

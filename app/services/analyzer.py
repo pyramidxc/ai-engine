@@ -1,6 +1,5 @@
-"""
-Attack path analysis service.
-Orchestrates the analysis workflow using LLM and prompt building.
+"""Attack path generation service.
+Orchestrates the generation workflow using LLM and prompt building.
 """
 from app.models.host import InputHost
 from app.models.analysis import AttackPathResponse
@@ -9,26 +8,26 @@ from app.core.prompts import PromptBuilder
 
 
 class AttackPathAnalyzer:
-    """Service for analyzing attack paths based on host data."""
+    """Service for generating attack paths from host exposure data."""
     
     def __init__(self):
-        """Initialize the analyzer with required services."""
+        """Initialize the generator with required services."""
         self.llm_client = LLMClient()
         self.prompt_builder = PromptBuilder()
     
     async def analyze(self, host: InputHost) -> AttackPathResponse:
         """
-        Analyze a host and generate attack path.
+        Generate attack path from host exposure data.
         
         Args:
-            host: Input host data to analyze
+            host: Input host data from external collector
             
         Returns:
-            Attack path analysis results
+            Generated attack path with risk assessment
             
         Raises:
             ValueError: If LLM response is invalid
-            Exception: For other analysis errors
+            Exception: For other generation errors
         """
         # Build prompt
         user_prompt = self.prompt_builder.build_attack_analysis_prompt(host)
@@ -42,8 +41,8 @@ class AttackPathAnalyzer:
         
         # Validate and build response
         return AttackPathResponse(
-            hostname=host.hostname,
+            platform=host.platform,
+            version_os=host.version_os,
             attack_path=analysis.get("attack_path", []),
-            risk_level=analysis.get("risk_level", "Unknown"),
-            recommendations=analysis.get("recommendations", [])
+            risk_level=analysis.get("risk_level", "Unknown")
         )

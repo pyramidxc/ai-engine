@@ -1,4 +1,4 @@
-# 🚀 Quick Start Guide
+# Quick Start Guide
 
 Fast reference for getting up and running with the Attack Path Engine.
 
@@ -129,12 +129,17 @@ docker-compose down
 # Health check
 curl http://localhost:8000/health
 
-# Analyze a host
+# Generate attack path (using collector data)
 curl -X POST http://localhost:8000/attack-path \
   -H "Content-Type: application/json" \
   -d '{
-    "hostname": "example.com",
+    "platform": "Linux",
+    "version_os": "Ubuntu 20.04.3 LTS",
     "open_ports": [22, 80, 443],
+    "services": [
+      "OpenSSH 8.2p1 on port 22",
+      "Apache httpd 2.4.41 on port 80"
+    ],
     "vulnerabilities": ["CVE-2023-12345: SQL Injection"]
   }'
 
@@ -237,10 +242,10 @@ Once running, visit:
 - Swagger UI: [Swagger UI](http://localhost:8000/docs)
 - ReDoc: [ReDoc](http://localhost:8000/redoc)
 
-## Common Models
+## Common Models for Attack Path Generation
 
 | Provider | Model | Cost | Quality |
-|----------|-------|------|---------|
+|----------|-------|---------|---------|
 | OpenAI | gpt-4o-mini | $ | Good |
 | OpenAI | gpt-4o | $$$ | Best |
 | Anthropic | claude-3-5-sonnet | $$$ | Best |
