@@ -1,0 +1,57 @@
+{
+  "platform": "Linux",
+  "version_os": "Ubuntu 22.04.2 LTS",
+  "asset_name": "jenkins-ci-01",
+  "ip_addresses": ["10.20.30.40"],
+  
+  "network_segment": "Internal - CI/CD Zone",
+  "internet_exposed": false,
+  
+  "open_ports": [22, 8080, 50000],
+  "services": [
+    "OpenSSH 8.9p1 on port 22",
+    "Jenkins 2.400 on port 8080",
+    "Jenkins agent on port 50000"
+  ],
+  
+  "vulnerabilities": [],
+  "critical_vuln_count": 0,
+  
+  "security_controls": [
+    "AppArmor enabled"
+  ],
+  "firewall_status": "Enabled",
+  
+  "admin_accounts": ["jenkins", "deploy"],
+  "mfa_enabled": false,
+  
+  "installed_software": [
+    "Jenkins 2.400",
+    "Docker 24.0",
+    "Git 2.34",
+    "AWS CLI 2.11",
+    "kubectl 1.27"
+  ],
+  
+  "patch_level": "Up-to-date - All patches current",
+  
+  "configurations": [
+    "Jenkins script console accessible without authentication",
+    "Groovy script execution enabled globally",
+    "Jenkins running as root user",
+    "Docker socket mounted in Jenkins container",
+    "AWS credentials stored in Jenkins credentials store (unencrypted)",
+    "kubectl config with cluster-admin privileges",
+    "Git repositories cloned with embedded credentials",
+    "No authorization strategy configured"
+  ],
+  
+  "asset_criticality": "Critical",
+  "business_role": "CI/CD Pipeline Server",
+  "environment": "Production",
+  "data_classification": "Restricted - All source code and deployment credentials",
+  
+  "cloud_iam_roles": [
+    "JenkinsDeploymentRole (AdministratorAccess)"
+  ]
+}

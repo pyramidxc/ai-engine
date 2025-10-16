@@ -129,8 +129,8 @@ docker-compose down
 # Health check
 curl http://localhost:8000/health
 
-# Generate attack path (using collector data)
-curl -X POST http://localhost:8000/attack-path \
+# Generate attack path with prompt tracking (default - good for debugging)
+curl -X POST "http://localhost:8000/attack-path?include_prompt=true" \
   -H "Content-Type: application/json" \
   -d '{
     "platform": "Linux",
@@ -143,11 +143,18 @@ curl -X POST http://localhost:8000/attack-path \
     "vulnerabilities": ["CVE-2023-12345: SQL Injection"]
   }'
 
-# Or use the example file
-curl -X POST http://localhost:8000/attack-path \
+# Generate without prompt (smaller response - good for production)
+curl -X POST "http://localhost:8000/attack-path?include_prompt=false" \
   -H "Content-Type: application/json" \
   -d @example_request.json
 ```
+
+**💡 Tip**: The `include_prompt` parameter (default: `true`) includes the generated prompt in the response. This is useful for:
+- **Debugging**: See exactly what context the AI received
+- **Auditing**: Log what information was used in analysis
+- **Transparency**: Understand how the engine adapts to your data
+
+Set to `false` in production to reduce response size.
 
 ## Run Test Script
 

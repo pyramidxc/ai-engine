@@ -1,0 +1,82 @@
+{
+  "platform": "Windows",
+  "version_os": "Windows Server 2008 R2 SP1",
+  "asset_name": "DC01",
+  "fqdn": "dc01.legacy.corp",
+  "ip_addresses": ["192.168.10.5"],
+  
+  "network_segment": "Internal - Core Services",
+  "internet_exposed": false,
+  
+  "open_ports": [53, 88, 135, 139, 389, 445, 636, 3389, 3268, 3269],
+  "services": [
+    "DNS on port 53",
+    "Kerberos on port 88",
+    "RPC on port 135",
+    "NetBIOS on port 139",
+    "LDAP on port 389",
+    "SMB on port 445",
+    "LDAPS on port 636",
+    "RDP on port 3389",
+    "Global Catalog on ports 3268, 3269"
+  ],
+  
+  "vulnerabilities": [
+    "CVE-2020-1472: Zerologon - Netlogon elevation of privilege",
+    "CVE-2017-0144: EternalBlue - SMBv1 RCE",
+    "CVE-2019-0708: BlueKeep - RDP RCE",
+    "Multiple missing privilege escalation patches"
+  ],
+  "critical_vuln_count": 4,
+  "vulnerability_score": 10.0,
+  
+  "security_controls": [
+    "Windows Defender (outdated definitions)"
+  ],
+  "antivirus_status": "Outdated - 6 months old definitions",
+  "firewall_status": "Disabled",
+  "encryption_status": "Not enabled",
+  
+  "domain_membership": "legacy.corp (Primary DC)",
+  "organizational_unit": "Domain Controllers",
+  "admin_accounts": [
+    "Administrator",
+    "Domain Admin",
+    "Enterprise Admin"
+  ],
+  "user_accounts": [
+    "500+ domain users"
+  ],
+  "mfa_enabled": false,
+  "password_policy": "Legacy - LM hashes still enabled",
+  
+  "patch_level": "End-of-Life - No patches since 2020",
+  "missing_patches": [
+    "All security patches since 2020",
+    "MS17-010 (EternalBlue)",
+    "KB4586819 (Zerologon)"
+  ],
+  "os_end_of_life": true,
+  
+  "configurations": [
+    "SMBv1 enabled",
+    "LLMNR and NBT-NS poisoning possible",
+    "Unconstrained delegation configured",
+    "PrintSpooler service running",
+    "Weak NTLM authentication allowed"
+  ],
+  
+  "asset_criticality": "Critical",
+  "business_role": "Active Directory Domain Controller",
+  "environment": "Production",
+  "data_classification": "Restricted - All Domain Credentials",
+  
+  "threat_intel_matches": [
+    "Known Zerologon exploit PoC widely available",
+    "EternalBlue actively exploited by ransomware gangs"
+  ],
+  "known_exploits": [
+    "Metasploit module: exploit/windows/smb/ms17_010_eternalblue",
+    "Zerologon exploitation tools publicly available"
+  ]
+}

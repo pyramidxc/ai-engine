@@ -1,0 +1,72 @@
+{
+  "platform": "Linux",
+  "version_os": "Ubuntu 20.04.3 LTS",
+  "asset_name": "web-prod-01",
+  "fqdn": "www.example.com",
+  "ip_addresses": ["203.0.113.50"],
+  
+  "network_segment": "DMZ",
+  "internet_exposed": true,
+  
+  "open_ports": [22, 80, 443, 3306, 2375],
+  "services": [
+    "OpenSSH 7.6p1 on port 22",
+    "Apache httpd 2.4.29 on port 80",
+    "Apache httpd 2.4.29 (SSL) on port 443",
+    "MySQL 5.7.33 on port 3306",
+    "Docker API on port 2375 (no authentication)"
+  ],
+  
+  "vulnerabilities": [
+    "CVE-2021-44228: Log4Shell RCE",
+    "CVE-2021-3156: Sudo heap overflow",
+    "CVE-2023-0286: OpenSSL type confusion"
+  ],
+  "critical_vuln_count": 3,
+  "vulnerability_score": 9.8,
+  
+  "security_controls": [
+    "ModSecurity WAF (detection only)",
+    "fail2ban"
+  ],
+  "antivirus_status": "Not Installed",
+  "firewall_status": "Enabled",
+  "encryption_status": "Not enabled",
+  
+  "admin_accounts": ["root", "ubuntu", "webadmin"],
+  "mfa_enabled": false,
+  "password_policy": "Weak - 8 char minimum, no complexity",
+  
+  "installed_software": [
+    "Docker 20.10.7",
+    "Java 1.8.0_292 (vulnerable to Log4Shell)",
+    "Git 2.17.1"
+  ],
+  
+  "patch_level": "Severely outdated - 18 months behind",
+  "missing_patches": [
+    "USN-5361-1 (Linux kernel)",
+    "Log4j 2.17.1 update",
+    "OpenSSL 1.1.1s update"
+  ],
+  
+  "configurations": [
+    "Docker API exposed on 0.0.0.0:2375 without TLS",
+    "MySQL root accessible from any host",
+    "SSH allows password authentication",
+    "Apache server-status endpoint publicly accessible",
+    "Directory listing enabled on /backup"
+  ],
+  
+  "asset_criticality": "Critical",
+  "business_role": "Public-Facing Web Application",
+  "environment": "Production",
+  "data_classification": "Confidential - Customer PII",
+  
+  "backup_location": "/var/backups (chmod 777)",
+  
+  "threat_intel_matches": [
+    "IP in Shodan database with exposed Docker API",
+    "Historical brute-force attempts on SSH"
+  ]
+}

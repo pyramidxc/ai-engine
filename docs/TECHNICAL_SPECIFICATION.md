@@ -125,6 +125,12 @@ API Version: 1.0.0
 
 **Purpose**: Generate realistic attack sequence from collector data
 
+**Query Parameters**:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `include_prompt` | boolean | No | `true` | Include generated prompt in response for debugging/auditing |
+
 **Request Headers**:
 
 ```http
@@ -167,9 +173,13 @@ Content-Type: application/json
     "Command and Control: Setup reverse shell over HTTPS using Metasploit (MITRE T1071.001)",
     "Actions on Objectives: Credential dumping, lateral movement via SSH, data exfiltration (MITRE T1003, T1021.004, T1048)"
   ],
-  "risk_level": "Critical"
+  "risk_level": "Critical",
+  "generated_prompt": "Generate a realistic attack path...\\n\\n=== CORE SYSTEM INFO ===\\n- Platform: Linux\\n...[full prompt, ~5000-9000 characters]",
+  "prompt_sections": 5
 }
 ```
+
+**Note**: `generated_prompt` and `prompt_sections` are included when `include_prompt=true` (default). Set `include_prompt=false` to omit them.
 
 **Error Responses**:
 

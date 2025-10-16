@@ -1,0 +1,12 @@
+{
+  "platform": "Linux",
+  "version_os": "Ubuntu 20.04.3 LTS",
+  "open_ports": [22, 80, 443],
+  "services": [
+    "OpenSSH 8.2p1 on port 22",
+    "Apache httpd 2.4.41 on port 80"
+  ],
+  "vulnerabilities": [
+    "CVE-2023-12345: SQL Injection vulnerability"
+  ]
+}

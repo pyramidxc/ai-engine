@@ -72,9 +72,15 @@ Check if the service is running.
 
 ### Generate Attack Path
 
-**POST** `/attack-path`
+**POST** `/attack-path?include_prompt=true`
 
 Generate a realistic attack path from host exposure data collected by external systems.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `include_prompt` | boolean | `true` | Include the generated prompt in response for debugging/auditing |
 
 **Request Body (from external collector):**
 
@@ -97,7 +103,7 @@ Generate a realistic attack path from host exposure data collected by external s
 }
 ```
 
-**Response:**
+**Response (with `include_prompt=true`):**
 
 ```json
 {
@@ -112,7 +118,22 @@ Generate a realistic attack path from host exposure data collected by external s
     "Command and Control: Establish reverse HTTPS shell using Metasploit (MITRE T1071.001). Listener on attacker.com:443 with SSL encryption",
     "Actions on Objectives: Credential dumping from /etc/shadow (T1003.008), lateral movement via SSH keys (T1021.004), database exfiltration (T1048.002)"
   ],
-  "risk_level": "Critical"
+  "risk_level": "Critical",
+  "generated_prompt": "Generate a realistic attack path for the following target...\\n\\n=== CORE SYSTEM INFO ===\\n- Platform: Linux\\n- OS Version: Ubuntu 20.04.3 LTS\\n\\n=== NETWORK SERVICES & EXPOSURES ===\\n...[full prompt text]",
+  "prompt_sections": 3
+}
+```
+
+**Response (with `include_prompt=false`):**
+
+```json
+{
+  "platform": "Linux",
+  "version_os": "Ubuntu 20.04.3 LTS",
+  "attack_path": [...],
+  "risk_level": "Critical",
+  "generated_prompt": null,
+  "prompt_sections": null
 }
 ```
 
@@ -124,8 +145,13 @@ Generate a realistic attack path from host exposure data collected by external s
 # Test health endpoint
 curl http://localhost:8000/health
 
-# Analyze a host
-curl -X POST http://localhost:8000/attack-path \
+# Analyze a host (with prompt tracking - default)
+curl -X POST "http://localhost:8000/attack-path?include_prompt=true" \
+  -H "Content-Type: application/json" \
+  -d @example_request.json
+
+# Analyze without prompt (smaller response)
+curl -X POST "http://localhost:8000/attack-path?include_prompt=false" \
   -H "Content-Type: application/json" \
   -d @example_request.json
 ```

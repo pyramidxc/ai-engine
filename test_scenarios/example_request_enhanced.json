@@ -1,0 +1,110 @@
+{
+  "platform": "Linux",
+  "version_os": "Ubuntu 20.04.3 LTS",
+  "asset_name": "web-prod-01",
+  "asset_id": "AST-12345",
+  "fqdn": "web-prod-01.corp.example.com",
+  "ip_addresses": ["10.0.1.50", "203.0.113.42"],
+  "mac_addresses": ["00:1B:44:11:3A:B7"],
+  
+  "network_segment": "DMZ",
+  "internet_exposed": true,
+  
+  "open_ports": [22, 80, 443, 3306, 2375],
+  "services": [
+    "OpenSSH 8.2p1 on port 22",
+    "Apache httpd 2.4.41 on port 80",
+    "Apache httpd 2.4.41 (SSL) on port 443",
+    "MySQL 5.7.33 on port 3306",
+    "Docker API on port 2375 (unauthenticated)"
+  ],
+  
+  "vulnerabilities": [
+    "CVE-2023-12345: SQL Injection in web application",
+    "CVE-2023-23456: Outdated SSH version with known exploits",
+    "CVE-2023-34567: MySQL running with default credentials"
+  ],
+  "vulnerability_score": 9.8,
+  "critical_vuln_count": 3,
+  
+  "security_controls": [
+    "CrowdStrike Falcon EDR - Active",
+    "pfSense Firewall - Permissive ruleset"
+  ],
+  "edr_agent": "CrowdStrike Falcon v6.45",
+  "antivirus_status": "Active",
+  "firewall_status": "Enabled",
+  "encryption_status": "Not enabled",
+  
+  "domain_membership": "corp.example.com",
+  "organizational_unit": "OU=DMZ Servers,OU=Production,DC=corp,DC=example,DC=com",
+  "admin_accounts": ["root", "ubuntu", "dbadmin"],
+  "service_accounts": ["mysql", "www-data", "jenkins"],
+  "mfa_enabled": false,
+  "password_policy": "Weak - no complexity requirements",
+  
+  "installed_software": [
+    "Docker 20.10.12",
+    "Jenkins 2.346.1",
+    "Git 2.34.1",
+    "Python 3.8.10",
+    "Node.js 14.17.0"
+  ],
+  "database_software": [
+    "MySQL 5.7.33"
+  ],
+  "development_tools": [
+    "Docker",
+    "Jenkins",
+    "Git"
+  ],
+  
+  "patch_level": "Missing critical kernel patches from last 6 months",
+  "missing_patches": [
+    "USN-5361-1 (Linux kernel vulnerabilities)",
+    "USN-5368-1 (OpenSSL vulnerabilities)",
+    "USN-5412-1 (MySQL vulnerabilities)"
+  ],
+  "os_end_of_life": false,
+  
+  "configurations": [
+    "Docker socket exposed on 0.0.0.0:2375 without authentication",
+    "Jenkins running without authentication on /script endpoint",
+    "MySQL root accessible remotely with default credentials",
+    "SSH allows password authentication",
+    "Apache directory listing enabled on /backup",
+    "Web application uses outdated PHP libraries"
+  ],
+  "security_recommendations": [
+    "Enable Docker TLS authentication",
+    "Implement Jenkins authentication and authorization",
+    "Change MySQL default credentials",
+    "Disable SSH password authentication",
+    "Apply missing security patches"
+  ],
+  
+  "asset_criticality": "High",
+  "business_role": "Production Web Server",
+  "environment": "Production",
+  "data_classification": "Confidential",
+  
+  "cloud_provider": "AWS",
+  "cloud_instance_type": "t3.medium",
+  "cloud_iam_roles": [
+    "EC2InstanceRole",
+    "S3ReadWriteAccess"
+  ],
+  "container_runtime": "Docker 20.10.12",
+  
+  "backup_system": "rsync",
+  "backup_location": "/backup (world-readable permissions)",
+  
+  "threat_intel_matches": [
+    "IP appears in recent vulnerability scanning activity",
+    "Port 2375 exposure matches known Docker exploitation campaigns"
+  ],
+  "known_exploits": [
+    "Metasploit module available for CVE-2023-12345",
+    "Public PoC exploit for unauthenticated Docker API access"
+  ]
+}

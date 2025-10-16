@@ -6,61 +6,249 @@ from app.models.host import InputHost
 
 
 class PromptBuilder:
-    """Builds prompts for attack path generation."""
+    """Builds dynamic prompts for attack path generation based on available data."""
     
     SYSTEM_MESSAGE = (
         "You are a MITRE ATT&CK and Cyber Kill Chain expert specializing in offensive security. "
         "Your role is to generate realistic, step-by-step attack sequences based on vulnerability "
         "and exposure data provided by external collectors. Structure attack paths following the "
         "Cyber Kill Chain phases and map each action to relevant MITRE ATT&CK techniques. "
-        "Provide detailed technical descriptions and include code examples when applicable."
+        "Provide detailed technical descriptions and include code examples when applicable. "
+        "Tailor your attack path based on the specific context provided - consider security controls, "
+        "network segmentation, identity management, and all available asset details."
     )
+    
+    @staticmethod
+    def _format_list(items: list | None, default: str = "None detected") -> str:
+        """Format a list for display, handling None and empty lists."""
+        if not items:
+            return default
+        return '\n  • ' + '\n  • '.join(str(item) for item in items)
+    
+    @staticmethod
+    def _format_value(value, default: str = "Not specified") -> str:
+        """Format a single value for display."""
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return "Yes" if value else "No"
+        return str(value)
     
     @staticmethod
     def build_attack_analysis_prompt(host: InputHost) -> str:
         """
-        Build a prompt for attack path generation.
+        Build a dynamic prompt for attack path generation.
+        
+        Intelligently constructs the prompt based on available data fields.
+        Only includes sections where data is provided, making the prompt
+        concise and relevant to the specific host context.
         
         Args:
-            host: Input host data from external collector (platform, version_os, ports, services, vulnerabilities)
+            host: Input host data from external collector
             
         Returns:
             Formatted prompt string for LLM to generate attack sequence
         """
-        ports_text = (
-            ', '.join(map(str, host.open_ports)) 
-            if host.open_ports 
-            else 'None detected'
-        )
+        pb = PromptBuilder  # Alias for shorter calls
         
-        services_text = (
-            '\n  • '.join(host.services) 
-            if host.services 
-            else 'None detected'
-        )
+        # Build sections dynamically based on available data
+        sections = []
         
-        vulns_text = (
-            '\n  • '.join(host.vulnerabilities) 
-            if host.vulnerabilities 
-            else 'None detected'
-        )
+        # ==================== CORE SYSTEM INFO ====================
+        if host.platform or host.version_os:
+            core_info = []
+            if host.platform:
+                core_info.append(f"- Platform: {host.platform}")
+            if host.version_os:
+                core_info.append(f"- OS Version: {host.version_os}")
+            if host.os_end_of_life:
+                core_info.append(f"- ⚠️ OS END-OF-LIFE: System is running unsupported OS version")
+            sections.append("=== CORE SYSTEM INFO ===\n" + "\n".join(core_info))
+        
+        # ==================== ASSET IDENTIFICATION ====================
+        asset_info = []
+        if host.asset_name:
+            asset_info.append(f"- Asset Name: {host.asset_name}")
+        if host.asset_id:
+            asset_info.append(f"- Asset ID: {host.asset_id}")
+        if host.fqdn:
+            asset_info.append(f"- FQDN: {host.fqdn}")
+        if host.ip_addresses:
+            asset_info.append(f"- IP Addresses: {', '.join(host.ip_addresses)}")
+        if host.mac_addresses:
+            asset_info.append(f"- MAC Addresses: {', '.join(host.mac_addresses)}")
+        
+        if asset_info:
+            sections.append("=== ASSET IDENTIFICATION ===\n" + "\n".join(asset_info))
+        
+        # ==================== ASSET CONTEXT & RISK ====================
+        context_info = []
+        if host.asset_criticality:
+            context_info.append(f"- 🎯 Asset Criticality: {host.asset_criticality}")
+        if host.business_role:
+            context_info.append(f"- Business Role: {host.business_role}")
+        if host.environment:
+            context_info.append(f"- Environment: {host.environment}")
+        if host.data_classification:
+            context_info.append(f"- Data Classification: {host.data_classification}")
+        
+        if context_info:
+            sections.append("=== ASSET CONTEXT (HIGH PRIORITY FOR RISK ASSESSMENT) ===\n" + "\n".join(context_info))
+        
+        # ==================== NETWORK & EXPOSURE ====================
+        network_info = []
+        if host.network_segment:
+            network_info.append(f"- Network Segment: {host.network_segment}")
+        if host.internet_exposed is not None:
+            exposure = "YES - Exposed to Internet 🌐" if host.internet_exposed else "No - Internal only"
+            network_info.append(f"- Internet Exposed: {exposure}")
+        if host.open_ports:
+            network_info.append(f"- Open Ports: {', '.join(map(str, host.open_ports))}")
+        if host.services:
+            network_info.append(f"- Services:{pb._format_list(host.services)}")
+        if host.firewall_rules:
+            network_info.append(f"- Firewall Rules:{pb._format_list(host.firewall_rules)}")
+        
+        if network_info:
+            sections.append("=== NETWORK & EXPOSURE ===\n" + "\n".join(network_info))
+        
+        # ==================== SECURITY CONTROLS ====================
+        security_info = []
+        if host.security_controls:
+            security_info.append(f"- Security Controls:{pb._format_list(host.security_controls)}")
+        if host.edr_agent:
+            security_info.append(f"- EDR Agent: {host.edr_agent}")
+        if host.antivirus_status:
+            security_info.append(f"- Antivirus Status: {host.antivirus_status}")
+        if host.firewall_status:
+            security_info.append(f"- Firewall Status: {host.firewall_status}")
+        if host.encryption_status:
+            security_info.append(f"- Disk Encryption: {host.encryption_status}")
+        
+        if security_info:
+            sections.append("=== SECURITY CONTROLS (CONSIDER FOR EVASION) ===\n" + "\n".join(security_info))
+        
+        # ==================== VULNERABILITIES & PATCH STATUS ====================
+        vuln_info = []
+        if host.vulnerabilities:
+            vuln_info.append(f"- Known Vulnerabilities:{pb._format_list(host.vulnerabilities)}")
+        if host.vulnerability_score is not None:
+            vuln_info.append(f"- Vulnerability Score: {host.vulnerability_score}")
+        if host.critical_vuln_count is not None:
+            vuln_info.append(f"- Critical Vulnerabilities: {host.critical_vuln_count}")
+        if host.patch_level:
+            vuln_info.append(f"- Patch Level: {host.patch_level}")
+        if host.missing_patches:
+            vuln_info.append(f"- Missing Patches:{pb._format_list(host.missing_patches)}")
+        
+        if vuln_info:
+            sections.append("=== VULNERABILITIES & PATCH STATUS ===\n" + "\n".join(vuln_info))
+        
+        # ==================== IDENTITY & ACCESS MANAGEMENT ====================
+        identity_info = []
+        if host.domain_membership:
+            identity_info.append(f"- Domain: {host.domain_membership}")
+        if host.organizational_unit:
+            identity_info.append(f"- Organizational Unit: {host.organizational_unit}")
+        if host.user_accounts:
+            identity_info.append(f"- User Accounts:{pb._format_list(host.user_accounts)}")
+        if host.admin_accounts:
+            identity_info.append(f"- 🔑 Admin Accounts:{pb._format_list(host.admin_accounts)}")
+        if host.service_accounts:
+            identity_info.append(f"- Service Accounts:{pb._format_list(host.service_accounts)}")
+        if host.mfa_enabled is not None:
+            mfa = "Enabled ✓" if host.mfa_enabled else "NOT ENABLED ⚠️"
+            identity_info.append(f"- Multi-Factor Authentication: {mfa}")
+        if host.password_policy:
+            identity_info.append(f"- Password Policy: {host.password_policy}")
+        
+        if identity_info:
+            sections.append("=== IDENTITY & ACCESS MANAGEMENT ===\n" + "\n".join(identity_info))
+        
+        # ==================== INSTALLED SOFTWARE ====================
+        software_info = []
+        if host.installed_software:
+            software_info.append(f"- Installed Software:{pb._format_list(host.installed_software)}")
+        if host.database_software:
+            software_info.append(f"- Database Software:{pb._format_list(host.database_software)}")
+        if host.development_tools:
+            software_info.append(f"- Development Tools:{pb._format_list(host.development_tools)}")
+        if host.browser_extensions:
+            software_info.append(f"- Browser Extensions:{pb._format_list(host.browser_extensions)}")
+        
+        if software_info:
+            sections.append("=== INSTALLED SOFTWARE (ADDITIONAL ATTACK VECTORS) ===\n" + "\n".join(software_info))
+        
+        # ==================== MISCONFIGURATIONS ====================
+        config_info = []
+        if host.configurations:
+            config_info.append(f"- ⚠️ Misconfigurations:{pb._format_list(host.configurations)}")
+        if host.security_recommendations:
+            config_info.append(f"- Security Recommendations:{pb._format_list(host.security_recommendations)}")
+        if host.compliance_gaps:
+            config_info.append(f"- Compliance Gaps:{pb._format_list(host.compliance_gaps)}")
+        
+        if config_info:
+            sections.append("=== MISCONFIGURATIONS & WEAKNESSES ===\n" + "\n".join(config_info))
+        
+        # ==================== CLOUD & CONTAINER ====================
+        cloud_info = []
+        if host.cloud_provider:
+            cloud_info.append(f"- Cloud Provider: {host.cloud_provider}")
+        if host.cloud_instance_type:
+            cloud_info.append(f"- Instance Type: {host.cloud_instance_type}")
+        if host.cloud_iam_roles:
+            cloud_info.append(f"- IAM Roles:{pb._format_list(host.cloud_iam_roles)}")
+        if host.container_runtime:
+            cloud_info.append(f"- Container Runtime: {host.container_runtime}")
+        if host.kubernetes_cluster:
+            cloud_info.append(f"- Kubernetes Cluster: {host.kubernetes_cluster}")
+        
+        if cloud_info:
+            sections.append("=== CLOUD & CONTAINER ENVIRONMENT ===\n" + "\n".join(cloud_info))
+        
+        # ==================== BACKUP & RECOVERY ====================
+        backup_info = []
+        if host.backup_system:
+            backup_info.append(f"- Backup System: {host.backup_system}")
+        if host.backup_location:
+            backup_info.append(f"- Backup Location: {host.backup_location}")
+        
+        if backup_info:
+            sections.append("=== BACKUP & RECOVERY (POTENTIAL EXFILTRATION TARGET) ===\n" + "\n".join(backup_info))
+        
+        # ==================== THREAT INTELLIGENCE ====================
+        threat_info = []
+        if host.threat_intel_matches:
+            threat_info.append(f"- 🔴 Threat Intel Matches:{pb._format_list(host.threat_intel_matches)}")
+        if host.known_exploits:
+            threat_info.append(f"- Known Exploits:{pb._format_list(host.known_exploits)}")
+        
+        if threat_info:
+            sections.append("=== THREAT INTELLIGENCE ===\n" + "\n".join(threat_info))
+        
+        # Build the complete prompt
+        target_info = "\n\n".join(sections) if sections else "Minimal information available - generate generic attack path"
         
         prompt = f"""Generate a realistic attack path for the following target based on collected vulnerability and exposure data.
 
-Target Information (from external collector):
-- Platform: {host.platform}
-- OS Version: {host.version_os}
-- Open Ports: {ports_text}
-- Services:
-  • {services_text}
-- Known Vulnerabilities:
-  • {vulns_text}
+TARGET INFORMATION (from external collector):
 
-Your task:
+{target_info}
+
+YOUR TASK:
 1. Generate a detailed, step-by-step attack path following the Cyber Kill Chain phases
 2. Map each action to relevant MITRE ATT&CK techniques (TTP - Tactics, Techniques, and Procedures)
-3. Provide technical details and include code examples when applicable
-4. Assess the overall risk level based on exploitability and impact
+3. **CRITICAL**: Tailor the attack path to the SPECIFIC CONTEXT provided above:
+   - If security controls (EDR, firewall) are present, include evasion techniques
+   - If cloud/container environments are detected, include cloud-native attack techniques
+   - If misconfigurations are listed, exploit them specifically
+   - If admin accounts are identified, target them for privilege escalation
+   - If MFA is disabled, note easier credential access
+   - If asset criticality is high, emphasize the business impact
+   - Consider network segmentation for lateral movement strategies
+4. Provide technical details and include code examples when applicable
+5. Assess the overall risk level based on exploitability, impact, AND asset criticality
 
 Attack Path Structure - Follow Cyber Kill Chain Phases:
 
@@ -90,36 +278,31 @@ Guidelines:
 Format your response as JSON with this exact structure:
 {{
     "attack_path": [
-        "Reconnaissance: [Detailed description of information gathering phase with MITRE mapping, e.g., T1595.002 - Active Scanning: Vulnerability Scanning. Example: nmap -sV -sC <target> to enumerate services and OS version]",
-        
-        "Weaponization: [Description of exploit/payload preparation with MITRE mapping and tool details]",
-        
-        "Delivery: [Description of delivery vector with MITRE mapping and technical approach]",
-        
-        "Exploitation: [Detailed exploitation with CVE, commands, code examples, and MITRE mapping, e.g., T1190 - Exploit Public-Facing Application]",
-        
-        "Installation: [Description of persistence mechanism with commands/code and MITRE mapping, e.g., T1053.005 - Scheduled Task]",
-        
-        "Command and Control: [C2 setup details with tools, protocols, and MITRE mapping, e.g., T1071.001 - Web Protocols]",
-        
-        "Actions on Objectives: [Description of final goals with techniques and MITRE mapping, e.g., T1005 - Data from Local System, T1048 - Exfiltration Over Alternative Protocol]"
+        "Reconnaissance: [Detailed description with SPECIFIC context from target info, MITRE mapping]",
+        "Weaponization: [Description considering security controls present, MITRE mapping]",
+        "Delivery: [Description considering network exposure and segmentation, MITRE mapping]",
+        "Exploitation: [Detailed exploitation of SPECIFIC vulnerabilities/misconfigurations listed, with CVE, commands, code examples, MITRE mapping]",
+        "Installation: [Persistence mechanism considering EDR/security controls, MITRE mapping]",
+        "Command and Control: [C2 setup considering firewall rules and network monitoring, MITRE mapping]",
+        "Actions on Objectives: [Goals considering asset criticality and data classification, MITRE mapping]"
     ],
     "risk_level": "Critical|High|Medium|Low"
 }}
 
-Risk Level Criteria:
-- Critical: Remote code execution, full system compromise, or data breach highly likely with easily exploitable vulnerabilities
-- High: Privilege escalation or significant data access possible with moderate exploitation complexity
-- Medium: Limited access achievable or requires additional steps/credentials/user interaction
-- Low: Minimal impact or highly complex exploitation requiring multiple preconditions
+Risk Level Criteria (CONSIDER ASSET CRITICALITY):
+- Critical: Remote code execution + (high asset criticality OR internet exposed OR no security controls OR active threat intel matches)
+- High: Privilege escalation possible + (medium/high criticality OR production environment OR sensitive data)
+- Medium: Limited access + (lower criticality OR strong security controls present OR requires user interaction)
+- Low: Minimal impact OR highly complex exploitation OR comprehensive security controls mitigate risk
 
 Rules:
 - Always return a valid JSON object with keys "attack_path" and "risk_level"
 - Each attack_path element must be a single string describing one Cyber Kill Chain phase
-- Always map actions to equivalent MITRE ATT&CK technique IDs (T####) to add analytical value
-- Include code examples, commands, or technical details when describing exploitation and post-exploitation
+- Always map actions to equivalent MITRE ATT&CK technique IDs (T####)
+- **REFERENCE SPECIFIC CONTEXT**: Use actual details from the target information (e.g., specific CVEs, account names, software versions, misconfigurations)
+- Include code examples, commands, or technical details when describing exploitation
 - Ensure output is valid, parseable JSON with no additional text outside the JSON structure
 
-Generate a realistic attack sequence now."""
+Generate a realistic, context-aware attack sequence now."""
         
         return prompt

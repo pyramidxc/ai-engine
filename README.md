@@ -5,8 +5,9 @@ FastAPI microservice that generates realistic attack paths from host exposure da
 ## ✨ Features
 
 - 🤖 **LLM-Powered Generation**: Uses AI to generate realistic, sequential attack paths
-- � **Data-Driven**: Works with data from external collectors (scanners, vulnerability tools)
-- �🔄 **Multi-Provider Support**: Works with OpenAI, Anthropic, Google Gemini, Azure, and 100+ providers via LiteLLM
+- 📊 **50+ Optional Parameters**: Accepts comprehensive host data for context-aware analysis
+- 🔍 **Prompt Tracking**: Optional transparency feature to see generated prompts for debugging
+- 🔄 **Multi-Provider Support**: Works with OpenAI, Anthropic, Google Gemini, Azure, and 100+ providers via LiteLLM
 - 🏗️ **Clean Architecture**: Professional separation of concerns for maintainability
 - 🚀 **Production-Ready**: Designed for scalability and async migration
 - 🎯 **Risk Assessment**: Automatic risk level classification (Critical, High, Medium, Low)
@@ -105,11 +106,13 @@ curl -X POST http://localhost:8000/attack-path \
   -d @example_request.json
 ```
 
-**Example Request Format:**
+**Example Request Format** (using a few of the 50+ optional parameters):
+
 ```json
 {
   "platform": "Linux",
   "version_os": "Ubuntu 20.04.3 LTS",
+  "asset_name": "web-prod-01",
   "open_ports": [22, 80, 443, 3306],
   "services": [
     "OpenSSH 8.2p1 on port 22",
@@ -118,8 +121,13 @@ curl -X POST http://localhost:8000/attack-path \
   ],
   "vulnerabilities": [
     "CVE-2023-12345: SQL Injection"
-  ]
+  ],
+  "mfa_enabled": false,
+  "security_controls": ["CrowdStrike EDR"],
+  "asset_criticality": "High"
 }
+
+_**Note**: All parameters are optional. Send any combination of the 50+ available parameters. See [INPUT_PARAMETERS.md](docs/INPUT_PARAMETERS.md) for the complete list._
 ```
 
 Or run the test script:
@@ -131,7 +139,8 @@ python test_engine.py
 ## API Endpoints
 
 - **GET** `/health` - Health check
-- **POST** `/attack-path` - Generate attack path analysis
+- **POST** `/attack-path?include_prompt=true` - Generate attack path analysis
+  - Query parameter `include_prompt` (default: `true`): Include generated prompt in response for debugging
 
 ## 📚 Documentation
 
@@ -141,7 +150,8 @@ python test_engine.py
 |----------|-------------|
 | **[Quick Start Guide](docs/QUICKSTART.md)** | ⚡ Fast setup and basic usage |
 | **[Architecture](docs/ARCHITECTURE.md)** | 🏛️ Clean architecture implementation details |
-| **[Refactoring Summary](docs/REFACTORING_SUMMARY.md)** | 📊 Migration from monolithic to layered |
+| **[Input Parameters](docs/INPUT_PARAMETERS.md)** | 📊 Complete list of 50+ optional parameters |
+| **[Prompt Tracking](docs/PROMPT_TRACKING.md)** | 🔍 Transparency feature for debugging prompts |
 | **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** | 🚀 Local vs Docker - choosing the right mode |
 | **[Usage Guide](docs/USAGE.md)** | 📘 Complete API documentation and examples |
 | **[Implementation Summary](docs/IMPLEMENTATION_SUMMARY.md)** | 🔧 Technical architecture and design |
