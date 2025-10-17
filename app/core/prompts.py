@@ -285,18 +285,11 @@ Format your response as JSON with this exact structure:
         "Installation: [Persistence mechanism considering EDR/security controls, MITRE mapping]",
         "Command and Control: [C2 setup considering firewall rules and network monitoring, MITRE mapping]",
         "Actions on Objectives: [Goals considering asset criticality and data classification, MITRE mapping]"
-    ],
-    "risk_level": "Critical|High|Medium|Low"
+    ]
 }}
 
-Risk Level Criteria (CONSIDER ASSET CRITICALITY):
-- Critical: Remote code execution + (high asset criticality OR internet exposed OR no security controls OR active threat intel matches)
-- High: Privilege escalation possible + (medium/high criticality OR production environment OR sensitive data)
-- Medium: Limited access + (lower criticality OR strong security controls present OR requires user interaction)
-- Low: Minimal impact OR highly complex exploitation OR comprehensive security controls mitigate risk
-
 Rules:
-- Always return a valid JSON object with keys "attack_path" and "risk_level"
+- Always return a valid JSON object with key "attack_path"
 - Each attack_path element must be a single string describing one Cyber Kill Chain phase
 - Always map actions to equivalent MITRE ATT&CK technique IDs (T####)
 - **REFERENCE SPECIFIC CONTEXT**: Use actual details from the target information (e.g., specific CVEs, account names, software versions, misconfigurations)

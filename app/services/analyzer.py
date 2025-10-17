@@ -237,17 +237,9 @@ class AttackPathAnalyzer:
         # The .get() method provides safe access to LLM response with defaults
         # in case the LLM returns unexpected structure (defensive programming)
         return AttackPathResponse(
-            # Echo back the platform and OS from input (may be None if not provided)
-            platform=host.platform,
-            version_os=host.version_os,
-            
             # Extract attack path from LLM response, default to empty list
             # Each item is a string describing one step in the attack sequence
             attack_path=analysis.get("attack_path", []),
-            
-            # Extract risk level, default to "Unknown" if not provided
-            # Should be one of: "Critical", "High", "Medium", "Low"
-            risk_level=analysis.get("risk_level", "Unknown"),
             
             # Include full prompt if requested (for debugging/auditing)
             # Otherwise None to keep response smaller
