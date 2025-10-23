@@ -206,11 +206,22 @@ class LLMClient:
         # Step 6: Parse and return response
         # =================================================================
         
+        # Extract token usage if available
+        tokens_used = {}
+        if hasattr(response, 'usage') and response.usage:
+            tokens_used = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+        
         # If JSON mode was requested, parse the JSON string
         # This converts the string response into a Python dict
         if json_mode:
-            return json.loads(content)
+            parsed = json.loads(content)
+            parsed["usage"] = tokens_used
+            return parsed
         
         # If JSON mode wasn't requested, wrap raw text in a dict
         # This ensures a consistent return type (always a dict)
-        return {"content": content}
+        return {"content": content, "usage": tokens_used}

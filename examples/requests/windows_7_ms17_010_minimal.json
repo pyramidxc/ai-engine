@@ -1,0 +1,7 @@
+{
+  "platform": "Windows",
+  "version_os": "Windows 7",
+  "open_ports": [139, 445],
+  "services": ["SMB"],
+  "vulnerabilities": ["MS17-010"]
+}

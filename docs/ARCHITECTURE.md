@@ -1,349 +1,460 @@
-# Architecture Documentation
+# Architecture
 
-## Overview
+## System Overview
 
-This document describes the clean architecture implementation of the Attack Path Engine, following modern Python best practices and separation of concerns principles.
+The AI Engine is a FastAPI-based service that performs sophisticated cybersecurity analysis through a 7-stage attack path generation system. It uses advanced context threading to maintain logical continuity across all stages while incorporating intelligent continuity validation.
 
-The system generates realistic attack sequences from vulnerability and exposure data collected by external systems (scanners, vulnerability assessment tools, etc.).
+## Architecture Diagram
 
-## Architecture Principles
-
-### 1. **Separation of Concerns**
-
-Each layer has a single, well-defined responsibility:
-
-- **Presentation Layer**: HTTP routing and request/response handling
-- **Business Logic Layer**: Core domain logic and orchestration
-- **Infrastructure Layer**: External integrations (LLM API calls)
-- **Data Layer**: Data models and validation
-
-### 2. **Dependency Direction**
-
-Dependencies flow inward:
-
-```bash
-HTTP Routes → Services → Core Logic
-     ↓            ↓           ↓
-  Models ←────────────────────┘
+```
+┌─────────────────────────────────────────────────────┐
+│                  FastAPI Application                 │
+│                   (Port 8000)                        │
+└──────────────────────┬──────────────────────────────┘
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+    ┌───▼────┐    ┌───▼────┐    ┌───▼────┐
+    │ POST   │    │ GET    │    │ Health │
+    │/analyze│    │/status │    │ /ready │
+    └────┬───┘    └────────┘    └────────┘
+         │
+    ┌────▼────────────────────────────┐
+    │  CompleteAnalyzer Service        │
+    │  (Orchestration & Context)       │
+    └────┬────────────────────┬────────┘
+         │                    │
+    ┌────▼──────────┐   ┌────▼──────────────────┐
+    │  LLMClient    │   │ ContinuityValidator   │
+    │  (OpenAI API) │   │ (Validation Logic)    │
+    └───────────────┘   └──────────────────────┘
+         │
+    ┌────▼────────────────────────────┐
+    │   AttackContext               │
+    │   (Shared State Threading)    │
+    └───────────────────────────────┘
 ```
 
-### 3. **Testability**
+## Core Components
 
-Each component can be tested in isolation with clear interfaces and dependencies.
+### 1. FastAPI Application (`app/main.py`)
 
-## Project Structure
+**Purpose**: HTTP request/response handling
 
-```bash
-app/
-├── main.py              # FastAPI routes (Presentation Layer)
-├── config.py            # Configuration management
-├── models/              # Data models (Data Layer)
-│   ├── __init__.py
-│   ├── host.py         # InputHost model
-│   └── analysis.py     # AttackPathResponse model
-├── services/            # Business logic (Business Layer)
-│   ├── __init__.py
-│   ├── analyzer.py     # Attack path analysis orchestration
-│   └── llm_client.py   # LLM API client (Infrastructure)
-└── core/                # Domain logic (Core Layer)
-    ├── __init__.py
-    └── prompts.py      # Prompt building logic
+**Endpoints**:
+- `POST /analyze` - Initiate security analysis
+- `GET /status` - System status
+- `GET /ready` - Health check
+
+**Configuration**: 
+- Loaded from `app/config.py`
+- Environment variables via `.env`
+- CORS headers for cross-origin requests
+
+### 2. CompleteAnalyzer Service (`app/services/complete_analyzer.py`)
+
+**Purpose**: Orchestrates 7-stage generation with context threading
+
+**Key Methods**:
+- `analyze(request)` → CompleteAnalysisResponse
+  - Validates input
+  - Generates all 7 stages
+  - Runs continuity validation
+  - Returns comprehensive response
+
+- `_generate_attack_path_with_continuity()` → List[StageAnalysis]
+  - Sequential 7-stage LLM generation
+  - Accumulates context through AttackContext
+  - Parses and validates each stage
+
+- `_extract_artifact_name(content, stage_index)` → Optional[str]
+  - 4-priority fallback strategy
+  - Code blocks → Explicit → Uploads → References
+
+- `_parse_stage_response(response_text, stage_index)` → StageAnalysis
+  - Parses LLM markdown output
+  - Extracts all fields (techniques, findings, tools, etc.)
+  - Calls artifact extraction
+
+- `_update_stage_artifacts(context, primary_path)`
+  - Populates stage_artifacts dict
+  - Tracks artifact usage across 7 stages
+
+**Data Flow**:
+```
+User Request
+    ↓
+Validate Input
+    ↓
+Create AttackContext
+    ↓
+Stage 1: Reconnaissance (context empty)
+    ↓
+Stage 2: Weaponization (context + stage 1)
+    ↓
+Stage 3: Delivery (context + stages 1-2)
+    ↓
+[... stages 4-7 similar pattern ...]
+    ↓
+Parse all stages
+    ↓
+Run ContinuityValidator
+    ↓
+Return CompleteAnalysisResponse
 ```
 
-## Component Responsibilities
+### 3. LLMClient (`app/services/llm_client.py`)
 
-### 1. Presentation Layer (`main.py`)
+**Purpose**: OpenAI API integration
 
-**Purpose**: Handle HTTP requests and responses
+**Methods**:
+- `generate(prompt, temperature, max_tokens)` → str
+  - Sends requests to OpenAI
+  - Handles retries and errors
+  - Logs token usage
 
-**Responsibilities**:
+**Configuration**:
+- Model: `OPENAI_MODEL` (default: gpt-4o-mini)
+- Temperature: 0.7 (balanced creativity/consistency)
+- Max tokens: Per-stage limit
+- Timeout: 30s per request
 
-- Define API endpoints
-- Request validation (via Pydantic)
-- Response formatting
-- Error handling at HTTP level
+### 4. ContinuityValidator (`app/utils/continuity_validator.py`)
 
-**Code**: ~45 lines (reduced from 100 lines)
+**Purpose**: Cross-stage coherence validation
 
+**Validation Checks**:
+
+1. **Artifact Continuity** (`_check_artifact_continuity`)
+   - Validates Stage 2 payload referenced in Stages 3-7
+   - Ensures weapon remains consistent
+   - Returns: pass/warning/fail
+
+2. **Vulnerability Continuity** (`_check_vulnerability_continuity`)
+   - Validates CVE from Stage 1 flows through Stages 2-4
+   - Ensures exploitation aligns with vuln
+   - Returns: pass/warning/fail
+
+3. **Technique Alignment** (`_check_technique_alignment`)
+   - Validates MITRE ATT&CK techniques logical progression
+   - Ensures techniques align with cyber kill chain
+   - Returns: pass/warning/fail
+
+4. **Tool Consistency** (`_check_tool_consistency`)
+   - Validates compatible tool usage across stages
+   - Ensures tool chains make sense
+   - Returns: pass/warning/fail
+
+**Output**:
 ```python
-@app.post("/attack-path", response_model=AttackPathResponse)
-async def attack_path(host: InputHost):
-    """Generate attack path from collector data"""
-    try:
-        return await analyzer.analyze(host)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+{
+    "is_valid": bool,
+    "total_checks": int,
+    "passes": List[str],
+    "warnings": List[str],
+    "stage_artifacts": Dict[int, Optional[str]]
+}
 ```
 
-### 2. Business Logic Layer (`services/`)
+### 5. Data Models (`app/models/`)
 
-#### `services/analyzer.py`
+**AttackContext** (`attack_context.py`)
+- Shared state threaded through all 7 stages
+- Accumulates outputs for context
+- Tracks artifact names per stage
+- Properties:
+  - `initial_target` - Starting input
+  - `stage_outputs` - Dict[int, StageAnalysis]
+  - `stage_artifacts` - Dict[int, Optional[str]]
 
-**Purpose**: Orchestrate the attack path generation workflow
+**CompleteAnalysisResponse** (`complete_analysis.py`)
+- Final API response structure
+- Contains all 7 stage analyses
+- Includes validation_report
+- Properties:
+  - `primary_path` - Ordered stages 1-7
+  - `validation_report` - Continuity validation results
+  - `model_used` - Which GPT model processed request
+  - `total_tokens` - Token usage summary
 
-**Responsibilities**:
+### 6. Core Prompts (`app/core/prompts.py`)
 
-- Coordinate between prompt building and LLM calls
-- Transform collector data into prompts
-- Transform LLM responses into structured attack paths
-- Validate generated attack sequences
+**Purpose**: Stage-specific LLM prompts
 
-**Dependencies**: LLMClient, PromptBuilder, Models
+**Stages** (with example prompts):
+1. **Reconnaissance** - Target analysis, vulnerability research
+2. **Weaponization** - Exploit creation, payload development
+3. **Delivery** - Distribution method planning
+4. **Exploitation** - Attack execution strategy
+5. **Installation** - Persistence mechanisms
+6. **Command & Control** - C2 communication setup
+7. **Actions on Objectives** - Post-exploitation goals
 
-#### `services/llm_client.py`
+Each prompt:
+- References prior stages in context
+- Specifies output format (markdown)
+- Includes constraints and guidelines
+- Optimized for consistency
 
-**Purpose**: Abstract LLM API interactions
+### 7. Configuration (`app/config.py`)
 
-**Responsibilities**:
-
-- Handle all LiteLLM API calls
-- Manage LLM configuration
-- Parse LLM responses
-- Handle LLM-specific errors
-
-**Dependencies**: LiteLLM library, Configuration
-
-### 3. Core Domain Layer (`core/`)
-
-#### `core/prompts.py`
-
-**Purpose**: Centralize prompt engineering logic
-
-**Responsibilities**:
-
-- Build structured prompts from collector data
-- Maintain prompt templates for attack path generation
-- Encapsulate offensive security domain knowledge
-- Define attack path generation guidelines
-
-**Dependencies**: Models only (no external services)
-
-### 4. Data Layer (`models/`)
-
-#### `models/host.py`
-
-**Purpose**: Define input data structures
-
-**Responsibilities**:
-
-- Validate host data from external collectors
-- Provide type safety for vulnerability and exposure data
-- Document expected fields from collector systems
-
-#### `models/analysis.py`
-
-**Purpose**: Define output data structures
-
-**Responsibilities**:
-
-- Structure generated attack paths
-- Enforce response format (attack sequence + risk level)
-- Provide API contract for generated paths
-
-### 5. Configuration (`config.py`)
-
-**Purpose**: Centralize all configuration management
-
-**Responsibilities**:
-
-- Load environment variables
-- Provide type-safe settings access
-- Validate required configuration
-
-## Design Patterns
-
-### 1. **Dependency Injection**
-
-Services are instantiated at application startup and injected where needed:
-
-```python
-analyzer = AttackPathAnalyzer()  # Instantiated once
-
-@app.post("/attack-path")
-async def attack_path(host: InputHost):
-    return await analyzer.analyze(host)  # Injected dependency
-```
-
-### 2. **Single Responsibility Principle**
-
-Each class has one reason to change:
-
-- `PromptBuilder`: Attack path generation logic changes
-- `LLMClient`: LLM API changes
-- `AttackPathAnalyzer`: Generation workflow changes
-- Route handlers: API contract changes
-
-### 3. **Open/Closed Principle**
-
-Easy to extend without modifying existing code:
-
-- Add new generation strategies by creating new analyzers
-- Add remediation generation in Phase 2 without touching existing code
-- Add new LLM providers by configuring LiteLLM
-- Add new prompt strategies by extending PromptBuilder
+**Settings**:
+- `DEBUG` - Debug mode (bool)
+- `LOG_LEVEL` - Logging level (DEBUG/INFO/WARNING/ERROR)
+- `OPENAI_API_KEY` - API authentication
+- `OPENAI_MODEL` - Model selection
+- `REQUEST_TIMEOUT_SECONDS` - Request timeout
+- `MAX_TOKENS_PER_STAGE` - Token limits
+- `TEMPERATURE` - LLM temperature (creativity)
 
 ## Data Flow
 
-### Request Flow
+### Request Processing
 
-```bash
-1. HTTP Request → FastAPI Route Handler
-2. Route Handler → AttackPathAnalyzer.analyze()
-3. Analyzer → PromptBuilder.build_prompt()
-4. Analyzer → LLMClient.complete()
-5. LLMClient → LiteLLM API → External LLM
-6. LLM Response → LLMClient (parse JSON)
-7. LLMClient → Analyzer (return parsed data)
-8. Analyzer → Validate and build AttackPathResponse
-9. Route Handler → Return HTTP response
+```
+1. User sends POST /analyze
+   ├─ Headers: Content-Type: application/json
+   └─ Body: { target: "...", context: "..." }
+
+2. FastAPI validates request
+   ├─ Pydantic validation
+   └─ Rejects if schema invalid
+
+3. CompleteAnalyzer.analyze()
+   ├─ Creates AttackContext
+   ├─ Builds 7 stage prompts
+   ├─ Calls LLMClient 7 times
+   │  ├─ Stage 1 (no context)
+   │  ├─ Stage 2 (+ stage 1)
+   │  ├─ Stage 3 (+ stages 1-2)
+   │  └─ ... stages 4-7 similar
+   ├─ Parses all responses
+   ├─ Extracts artifacts
+   ├─ Runs validation
+   └─ Returns response
+
+4. Response delivered to client
+   ├─ Headers: Content-Type: application/json
+   └─ Body: CompleteAnalysisResponse (JSON)
 ```
 
-### Error Flow
+### Context Threading
 
-```bash
-1. Exception occurs in any layer
-2. Exception propagates up to route handler
-3. Route handler catches and converts to HTTPException
-4. FastAPI converts to proper HTTP error response
+Each stage LLM call receives accumulated context:
+
+```
+Stage 1 Prompt
+├─ Input: target description
+└─ Output: reconnaissance findings
+
+Stage 2 Prompt
+├─ Input: target + stage 1 findings
+└─ Output: weaponization strategy
+
+Stage 3 Prompt
+├─ Input: target + stages 1-2 findings
+└─ Output: delivery method
+
+[Pattern continues through Stage 7]
+
+Final Output: Coherent 7-stage attack path
 ```
 
-## Benefits of This Architecture
+## Artifact Extraction Strategy
 
-### 1. **Maintainability**
+4-priority fallback ensures high accuracy:
 
-- Clear file organization
-- Easy to locate specific functionality
-- Reduced cognitive load
+```
+Priority 1: Code Blocks (Highest Confidence)
+├─ msfvenom -o <filename>
+├─ curl -O <filename>
+├─ wget <filename>
+├─ PowerShell -O <filename>
+└─ Common exploit frameworks
 
-### 2. **Testability**
+Priority 2: Explicit Naming (High Confidence)
+├─ "named: <filename>"
+├─ "created: <filename>"
+├─ "called: <filename>"
+└─ Explicit mention patterns
 
-```python
-# Test prompt building without LLM calls
-def test_prompt_builder():
-    builder = PromptBuilder()
-    prompt = builder.build_attack_analysis_prompt(mock_host)
-    assert "vulnerability" in prompt.lower()
+Priority 3: Upload/Transfer (Medium Confidence)
+├─ "upload <filename>"
+├─ "scp <filename>"
+├─ "copy <filename>"
+└─ Transfer patterns
 
-# Test analyzer with mocked LLM
-async def test_analyzer():
-    analyzer = AttackPathAnalyzer()
-    analyzer.llm_client = MockLLMClient()  # Inject mock
-    result = await analyzer.analyze(mock_host)
-    assert result.risk_level == "High"
+Priority 4: Prior References (Lower Confidence)
+├─ "from stage <n>"
+├─ "the payload created earlier"
+├─ "using <artifact-from-prior>"
+└─ Reference patterns
 ```
 
-### 3. **Extensibility**
+## Validation Pipeline
 
-Easy to add features:
-
-- Phase 2: Remediation recommendations
-- Phase 2: Compliance mapping
-- Phase 2: Threat intelligence integration
-- Multiple LLM providers
-- Caching layer for similar attack paths
-- Rate limiting
-- Background processing with queues
-
-### 4. **Readability**
-
-- Self-documenting structure
-- Clear imports show dependencies
-- Type hints improve IDE support
-
-## Migration to Async Architecture
-
-This clean architecture makes future async migration straightforward:
-
-### Current (Synchronous)
-
-```python
-class AttackPathAnalyzer:
-    async def analyze(self, host: InputHost) -> AttackPathResponse:
-        # Synchronous orchestration, async LLM call
-        return result
+```
+Parsed Stages
+    ↓
+Artifact Continuity
+├─ Stage 2 artifact exists?
+├─ Referenced in stages 3+?
+└─ Consistent naming?
+    ↓
+Vulnerability Continuity
+├─ CVE from stage 1?
+├─ Exploited in stage 4?
+├─ Logically sound?
+└─ Tool matches?
+    ↓
+Technique Alignment
+├─ Valid MITRE ATT&CK?
+├─ Progression logical?
+├─ Kill chain aligned?
+└─ Stage appropriate?
+    ↓
+Tool Consistency
+├─ Tools compatible?
+├─ Environment match?
+├─ Availability correct?
+└─ Version compatible?
+    ↓
+Validation Report
+└─ is_valid: true/false
 ```
 
-### Future (Fully Async with SQS)
+## Technology Stack
 
-```python
-class AttackPathAnalyzer:
-    async def analyze(self, host: InputHost, job_id: str) -> None:
-        # Async orchestration
-        result = await self._perform_analysis(host)
-        
-        # Send to SQS
-        await self.queue_client.send_result(job_id, result)
-        
-        # Trigger webhook
-        await self.webhook_client.notify(job_id, result)
-```
+### Core Framework
+- **FastAPI 0.100+**: Modern async web framework
+- **Pydantic 2.0+**: Data validation with Python types
+- **Python 3.10+**: Runtime with async/await
 
-**No changes required to**:
+### External Services
+- **OpenAI API**: GPT-4o-mini LLM model
+- **OpenAI Python Client**: SDK for API integration
 
-- Prompt building logic
-- Data models
-- LLM client interface
+### Development Tools
+- **Pytest**: Testing framework
+- **Black**: Code formatter
+- **Ruff**: Linter
+- **Mypy**: Type checker (optional)
 
-**Changes required**:
-
-- Add queue client to analyzer
-- Add webhook client to analyzer
-- Change return type to None (fire-and-forget)
-- Add job tracking in routes
+### Deployment
+- **Docker**: Container orchestration
+- **Docker Compose**: Multi-container management
+- **Gunicorn**: Production WSGI server
 
 ## Performance Characteristics
 
-### Current Implementation
+### Typical Request Timeline
+- Input validation: 10ms
+- LLM generation (7 stages): 10-20s (90% of total time)
+- Parsing & validation: 500ms
+- Response serialization: 10ms
+- **Total: 10-20 seconds**
 
-- **Latency**: 2-4 seconds (LLM call dominant)
-- **Concurrency**: Limited by synchronous orchestration
-- **Scalability**: Vertical scaling only
+### Token Usage
+- Per-request: 5-15k tokens typically
+- Per-stage average: 1-2k tokens
+- Input tokens: 30-40% of total
+- Output tokens: 60-70% of total
 
-### After Full Async Migration
+### Scalability
+- Single instance: ~3-5 concurrent requests
+- CPU: Minimal (mostly I/O waiting)
+- Memory: ~300MB base + 100MB per request
+- Network: Limited by OpenAI rate limits
 
-- **Latency**: <100ms (immediate job queuing)
-- **Concurrency**: Unlimited (background processing)
-- **Scalability**: Horizontal scaling with SQS workers
+## Security Architecture
 
-## Code Metrics
+### API Key Management
+- Stored in `.env` file (never committed)
+- Loaded into environment at runtime
+- Never logged or exposed in errors
+- See [SECURITY.md](../SECURITY.md)
 
-### Before Refactoring
+### Input Validation
+- Pydantic models enforce schema
+- Max length limits on all fields
+- Type checking on all inputs
+- Sanitization before LLM calls
 
-- **Files**: 1 (main.py)
-- **Lines**: 100
-- **Concerns**: Mixed (7+ responsibilities)
-- **Testability**: Low (hard to mock LLM)
+### Output Handling
+- No sensitive data in logs
+- Error messages generic (no internal details)
+- Response includes only necessary data
+- No PII preserved between requests
 
-### After Refactoring
+### Rate Limiting
+- Implement at API gateway level
+- Per-IP rate limits (recommended)
+- Per-key limits (future)
+- Graceful degradation on limits
 
-- **Files**: 9 (organized by concern)
-- **Lines**: ~120 total (more documentation)
-- **Concerns**: Separated (1 responsibility per file)
-- **Testability**: High (clear interfaces)
+## Extension Points
 
-## Next Steps
+### Adding New Stages
+1. Add stage prompt in `app/core/prompts.py`
+2. Extend `_generate_attack_path_with_continuity()` loop
+3. Update context threading logic
+4. Extend `StageAnalysis` if needed
+5. Add validation rule in `ContinuityValidator`
 
-### Phase 1 (Current - Attack Path Generation)
-1. **Add Unit Tests**: Test each component in isolation
-2. **Add Integration Tests**: Test full flow with real LLM
-3. **Add Caching**: Cache LLM responses for identical inputs
-4. **Add Monitoring**: Log generation requests and performance
-5. **Implement Async**: Add SQS + Lambda architecture
-6. **Add Authentication**: Secure the API endpoints
-7. **Add Rate Limiting**: Prevent abuse
+### Changing LLM Models
+1. Update `OPENAI_MODEL` in config
+2. Adjust token limits if needed
+3. Test prompt effectiveness
+4. Update documentation
 
-### Phase 2 (Future - Remediation & Intelligence)
-1. **Remediation Generation**: Add security recommendations
-2. **Compliance Mapping**: Map to security frameworks
-3. **Threat Intelligence**: Integrate external threat feeds
-4. **Attack Simulation**: Add playbook generation
+### Custom Validation Rules
+1. Extend `ContinuityValidator` with new `_check_*` method
+2. Call from `validate()` orchestrator
+3. Add results to report dict
+4. Document in validation section
 
-## Conclusion
+### Alternative LLM Providers
+1. Create new service: `LlamaClient`, `AnthropicClient`, etc.
+2. Implement same interface as `LLMClient`
+3. Update `CompleteAnalyzer` to use new provider
+4. Test prompt compatibility
+5. Document configuration
 
-This architecture provides a solid foundation for:
+## Future Roadmap
 
-- ✅ Clean, maintainable code
-- ✅ Easy testing at all levels
-- ✅ Simple extension with new features
-- ✅ Straightforward migration to async patterns
-- ✅ Professional production-ready structure
+### Planned Improvements
+- [ ] Multi-provider LLM support (Anthropic, Llama)
+- [ ] Prompt optimization pipeline
+- [ ] Response caching layer
+- [ ] Database persistence
+- [ ] Web UI frontend
+- [ ] Advanced analytics dashboard
+- [ ] Batch analysis mode
+- [ ] Custom validation rules engine
+
+### Scalability Enhancements
+- [ ] Horizontal scaling with load balancer
+- [ ] Request queuing system
+- [ ] Cache layer (Redis)
+- [ ] Async job processing
+- [ ] Database integration
+
+### Operational Features
+- [ ] Monitoring/alerting integration
+- [ ] Audit logging
+- [ ] Usage analytics
+- [ ] Cost tracking
+- [ ] Performance metrics
+
+## Related Documentation
+
+- [API Reference](API.md) - Endpoint documentation
+- [Development Guide](DEVELOPMENT.md) - Local setup
+- [Deployment Guide](DEPLOYMENT.md) - Production procedures
+- [Operational Runbook](RUNBOOK.md) - Day-to-day operations
+- [Architecture Decisions](adr/0002-continuity-validation-design.md)
+
+---
+
+Last updated: 2024
+Maintained by: AI Engine Team

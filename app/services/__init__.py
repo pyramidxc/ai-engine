@@ -2,6 +2,6 @@
 Business logic services.
 """
 from app.services.llm_client import LLMClient
-from app.services.analyzer import AttackPathAnalyzer
+from app.services.complete_analyzer import CompleteAnalyzer
 
-__all__ = ["LLMClient", "AttackPathAnalyzer"]
+__all__ = ["LLMClient", "CompleteAnalyzer"]

