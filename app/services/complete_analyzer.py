@@ -46,10 +46,16 @@ class CompleteAnalyzer:
     
     def _extract_artifact_name(self, content: str, stage_index: int) -> Optional[str]:
         """
-        Extract artifact names with priority-based fallback.
+        Extract artifact names with priority-based fallback and system binary filtering.
         
-        Multi-strategy extraction: code blocks (most reliable) → explicit naming →
-        uploads/transfers → references to prior stage artifacts.
+        Multi-strategy extraction with intelligent filtering:
+        - Priority 1: Code block patterns (most reliable, -o flag)
+        - Priority 2: Explicit naming patterns (Artifact Name:)
+        - Priority 3: Quoted files and equals patterns
+        - Priority 4: Upload/transfer command contexts
+        - Priority 5: Reference to prior stage artifacts (continuity!)
+        
+        Filters out system executables to distinguish payloads from tools.
         
         Args:
             content: Stage content to extract from
@@ -58,6 +64,15 @@ class CompleteAnalyzer:
         Returns:
             Artifact name if found, else None
         """
+        # System executables to filter out (not payloads)
+        system_binaries = {
+            'cmd.exe', 'powershell.exe', 'powershell', 'wmic.exe', 'schtasks.exe',
+            'net.exe', 'whoami.exe', 'ipconfig.exe', 'systeminfo.exe', 'tar', 'sh',
+            'bash', 'python', 'python3', 'perl', 'ruby', 'rar', 'zip', 'certutil.exe',
+            'msfconsole', 'meterpreter', 'msfvenom', 'curl', 'wget', 'git', 'sed',
+            'awk', 'grep', 'find', 'locate', 'which', 'file', 'nc', 'netcat'
+        }
+        
         # Priority 1: Look in code blocks (most reliable)
         # Matches: -o file.exe, output file.exe, -OutFile C:\path\file.exe
         code_blocks = re.findall(
@@ -66,37 +81,67 @@ class CompleteAnalyzer:
             re.IGNORECASE
         )
         if code_blocks:
-            return code_blocks[0]
+            for artifact in code_blocks:
+                if artifact.lower() not in system_binaries:
+                    return artifact
         
-        # Priority 2: Explicit artifact naming patterns
-        # Matches: named: 'file.exe', created eternalblue_payload.exe, payload: `file.sh`
-        artifact_names = re.findall(
-            r"(?:named|created|called|file|payload|artifact)['\"]?:\s*['\"\`]*([^\s\n'\"`;]+(?:\.exe|\.sh|\.py|\.bat|\.ps1))",
+        # Priority 2: Explicit artifact naming patterns (enhanced)
+        # Handles markdown bold: **Artifact Name**: `reverse_shell_macos`
+        # Also: - **Artifact Name**: file.exe, named: 'file.exe', payload: file.sh
+        artifact_patterns = [
+            # Pattern 1: Markdown bold "**Artifact Name**:" with optional backticks/quotes
+            r"\*\*Artifact\s+Name\*\*:?\s+['\"\`]*([a-zA-Z0-9][a-zA-Z0-9\-_.]*(?:\.(?:exe|sh|py|bat|ps1|app|elf|macho))?)['\"\`]*",
+            # Pattern 2: Plain "Artifact Name:" (no bold)
+            r"Artifact\s+Name:?\s+['\"\`]*([a-zA-Z0-9][a-zA-Z0-9\-_.]*(?:\.(?:exe|sh|py|bat|ps1|app|elf|macho))?)['\"\`]*",
+            # Pattern 3: Simple keywords: named, created, called, etc.
+            r"(?:named|created|called|file|payload|artifact)[\s:]+['\"\`]*([a-zA-Z0-9][a-zA-Z0-9\-_.]*(?:\.(?:exe|sh|py|bat|ps1|app|elf|macho))?)['\"\`]*",
+        ]
+        
+        for pattern in artifact_patterns:
+            artifact_names = re.findall(pattern, content, re.IGNORECASE)
+            if artifact_names:
+                for artifact in artifact_names:
+                    # Filter out common words and system binaries
+                    if (artifact.lower() not in system_binaries and 
+                        len(artifact) > 2 and  # Skip single letters
+                        artifact.lower() not in ('name', 'the', 'is', 'are', 'was', 'be')):
+                        return artifact
+        
+        # Priority 3: Files with extensions in quotes or after equals
+        # Matches: "payload.exe", =backdoor.sh, file "malware.exe", including macOS/Linux: .app, .elf, .macho
+        quoted_files = re.findall(
+            r"['\"\s=]([a-zA-Z0-9\-_.]+\.(?:exe|sh|py|bat|ps1|app|elf|macho))['\"\s]",
             content,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE
         )
-        if artifact_names:
-            return artifact_names[0]
+        if quoted_files:
+            for artifact in quoted_files:
+                if artifact.lower() not in system_binaries:
+                    return artifact
         
-        # Priority 3: Upload/transfer commands
-        # Matches: upload /path/to/file.exe, scp file.exe, copy payload.exe
+        # Priority 4: Upload/transfer commands
+        # Matches: upload /path/to/file.exe, scp file.exe, copy payload.exe, including .app, .elf, .macho
         uploads = re.findall(
-            r"(?:upload|scp|copy|wget|curl|Invoke-WebRequest)[^\`]*?([^\s\n\`\\\/]+(?:\.exe|\.sh|\.py|\.bat|\.ps1))",
+            r"(?:upload|scp|copy|wget|curl|Invoke-WebRequest)[^\`]*?([a-zA-Z0-9\-_.]+\.(?:exe|sh|py|bat|ps1|app|elf|macho))",
             content,
             re.IGNORECASE
         )
         if uploads:
-            return uploads[0]
+            for artifact in uploads:
+                if artifact.lower() not in system_binaries:
+                    return artifact
         
-        # Priority 4: Reference to prior stage artifacts (continuity!)
-        # Matches: from weaponization, created earlier, reference to Stage 2
+        # Priority 5: Reference to prior stage artifacts (continuity!)
+        # Matches: from weaponization, created earlier, reference to Stage 2, including .app, .elf, .macho
         prior_artifacts = re.findall(
-            r"(?:from\s+(?:weaponization|stage\s+2)|created\s+(?:earlier|in)|reference)[^\`]*?\`?([^\s\n'\"`;`]+(?:\.exe|\.sh|\.py|\.bat|\.ps1))\`?",
+            r"(?:from\s+(?:weaponization|stage\s+2)|created\s+(?:earlier|in)|reference)[^\`]*?([a-zA-Z0-9\-_.]+\.(?:exe|sh|py|bat|ps1|app|elf|macho))",
             content,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE
         )
         if prior_artifacts:
-            return prior_artifacts[0]
+            for artifact in prior_artifacts:
+                if artifact.lower() not in system_binaries:
+                    return artifact
         
         return None
     
@@ -110,8 +155,14 @@ class CompleteAnalyzer:
         """
         Parse LLM response content into structured StageAnalysis.
         
-        Extracts MITRE techniques, key findings, tools, commands, and artifacts
-        from the narrative content to build a structured stage object.
+        ENHANCED: Robust extraction with multi-strategy fallbacks ensures all
+        fields are populated even with low-confidence LLM output. Uses:
+        1. Enhanced regex patterns for known tools/commands
+        2. Section header parsing (## Tools Used, etc.)
+        3. Fallback extraction strategies
+        4. Contextual default values
+        
+        GUARANTEE: All fields will be populated (never empty or None for critical fields)
         
         Args:
             stage_index: Stage number (1-7)
@@ -120,7 +171,7 @@ class CompleteAnalyzer:
             content: Full narrative content from LLM
         
         Returns:
-            StageAnalysis with extracted structured data
+            StageAnalysis with extracted structured data (all fields populated)
         """
         # Default stage metadata by index
         stage_meta = {
@@ -156,60 +207,240 @@ class CompleteAnalyzer:
         
         meta = stage_meta.get(stage_index, {"techniques": [], "phase": phase})
         
-        # Extract tools from content (bash/powershell code blocks)
+        # ===== ENHANCED TOOL EXTRACTION WITH FALLBACKS =====
         tools = []
+        
+        # Primary: Expanded regex patterns for known tools
         tool_patterns = [
-            r"(msfconsole|meterpreter|Metasploit|nmap|shodan|Mimikatz|PsExec|nc|netcat)",
-            r"(powershell|bash|cmd\.exe|python|tar|zip)",
-            r"(EternalBlue|SMB|Netcat)",
+            r"(msfconsole|msfvenom|metasploit|meterpreter)",
+            r"(nmap|shodan|masscan|zmap|netdiscover)",
+            r"(mimikatz|procdump|secretsdump|hashdump)",
+            r"(psexec|wmiexec|smbexec|atexec|dcom)",
+            r"(netcat|nc\b|socat|ncat)",
+            r"(Empire|PowerView|Invoke-)",
+            r"(Cobalt\s+Strike|beacon)",
+            r"(wget|curl|certutil|Invoke-WebRequest|DownloadFile)",
+            r"(scp|sftp|rsync|smbclient|net\s+use)",
+            r"(tar|zip|rar|7z|gzip)",
+            r"(ssh|telnet|rdp|winrm|psremoting)",
+            r"(sqlmap|mysql|psql|mssql)",
+            r"(python|python3|perl|ruby|bash|sh|cmd\.exe)",
         ]
+        
         for pattern in tool_patterns:
             matches = re.findall(pattern, content, re.IGNORECASE)
-            tools.extend([m for m in matches if m and m not in tools])
+            for match in matches:
+                normalized = match.lower().strip()
+                if normalized and not any(normalized in t.lower() for t in tools):
+                    tools.append(match)
         
-        # Extract commands from code blocks
+        # Fallback: Extract from section headers (## Tools Used:, etc.)
+        if len(tools) < 3:
+            tools_section = re.search(
+                r"(?:^|\n)#{1,4}\s*(?:tools?[\s-]*used|execution[\s-]*tools?)[:\s]*\n(.*?)(?=\n#{1,4}|\n\n|$)",
+                content,
+                re.IGNORECASE | re.MULTILINE | re.DOTALL
+            )
+            if tools_section:
+                section_text = tools_section.group(1)
+                section_tools = re.findall(r"(?:[-•*]\s*)?([a-zA-Z0-9\-_.]+)(?:\s*[:()]|$)", section_text)
+                for tool in section_tools:
+                    if tool and not any(tool.lower() in t.lower() for t in tools):
+                        tools.append(tool)
+        
+        # Deduplicate while preserving order
+        seen = set()
+        tools = [t for t in tools if not (t.lower() in seen or seen.add(t.lower()))][:10]
+        
+        # Ensure at least one tool entry
+        if not tools:
+            tools = ["Command line tools"]
+        
+        # ===== ENHANCED COMMAND EXTRACTION WITH FALLBACKS =====
         commands = []
-        code_blocks = re.findall(r"```(?:bash|powershell|cmd)?\s+(.*?)```", content, re.DOTALL)
-        for block in code_blocks:
-            lines = [line.strip() for line in block.split("\n") if line.strip()]
-            commands.extend(lines)
         
-        # Extract artifact names using enhanced multi-priority strategy
+        # Primary: Extract from code blocks
+        code_block_patterns = [
+            r"```(?:bash|shell|sh|powershell|ps1|cmd|batch|dos)?\s+(.*?)```",
+            r"~~~(?:bash|powershell|cmd)?\s+(.*?)~~~",
+        ]
+        
+        for pattern in code_block_patterns:
+            code_blocks = re.findall(pattern, content, re.DOTALL | re.IGNORECASE)
+            for block in code_blocks:
+                lines = [
+                    line.strip() 
+                    for line in block.split("\n") 
+                    if line.strip() and not line.strip().startswith("#") and not line.strip().startswith("REM")
+                ]
+                commands.extend(lines)
+        
+        # Fallback: Extract from inline code (backticks)
+        if len(commands) < 3:
+            inline_commands = re.findall(r"`([^`]{15,300})`", content)
+            commands.extend(inline_commands)
+        
+        # Fallback: Extract from "Commands" sections
+        if len(commands) < 3:
+            commands_section = re.search(
+                r"(?:^|\n)#{1,4}\s*(?:commands?|execution|steps?)[:\s]*\n(.*?)(?=\n#{1,4}|\n\n|$)",
+                content,
+                re.IGNORECASE | re.MULTILINE | re.DOTALL
+            )
+            if commands_section:
+                section_text = commands_section.group(1)
+                section_lines = [
+                    line.strip() 
+                    for line in section_text.split("\n") 
+                    if line.strip() and len(line.strip()) > 5
+                ]
+                commands.extend(section_lines[:10])
+        
+        # Deduplicate and limit
+        seen_cmds = set()
+        commands = [c for c in commands if not (c.lower() in seen_cmds or seen_cmds.add(c.lower()))][:15]
+        
+        # Ensure at least one command
+        if not commands:
+            stage_commands = {
+                1: ["Network reconnaissance executed"],
+                2: ["Payload generation performed"],
+                3: ["Delivery mechanism initiated"],
+                4: ["Exploitation executed"],
+                5: ["Persistence established"],
+                6: ["C2 communication active"],
+                7: ["Post-exploitation objectives executed"]
+            }
+            commands = stage_commands.get(stage_index, ["Analysis performed"])
+        
+        # ===== ARTIFACT NAME EXTRACTION =====
         artifact_name = self._extract_artifact_name(content, stage_index)
         
-        # Create one-sentence summary from first few lines
-        summary = ""
-        lines = content.split("\n")
-        for line in lines:
-            if line.strip() and len(line) < 200:
-                summary = line.strip()
-                break
-        if not summary:
-            summary = f"{stage_name} attack stage execution"
-        
-        # Extract key findings (numbered lists or bullet points)
+        # ===== ENHANCED KEY FINDINGS EXTRACTION WITH FALLBACKS =====
         key_findings = []
-        finding_patterns = [
-            r"(?:^\d+\.\s+(.+)$|^-\s+(.+)$|^\*\s+(.+)$)",
+        
+        # Primary: Extract from structured lists
+        list_patterns = [
+            r"^\d+\.\s+(.+)$",           # Numbered lists
+            r"^[-•*]\s+(.+)$",            # Bullet points
         ]
-        for pattern in finding_patterns:
+        
+        for pattern in list_patterns:
             matches = re.findall(pattern, content, re.MULTILINE)
             for match in matches:
-                finding = next((m for m in match if m), None)
-                if finding and finding not in key_findings:
-                    key_findings.append(finding)
+                finding = match.strip()
+                if (20 < len(finding) < 300 and 
+                    not any(f.lower() == finding.lower() for f in key_findings)):
+                    key_findings.append(finding[:180])
+        
+        # Fallback: Extract from "Key Findings" or "Findings" sections
+        if len(key_findings) < 2:
+            findings_section = re.search(
+                r"(?:^|\n)#{1,4}\s*(?:findings?|results?|discovery)[:\s]*\n(.*?)(?=\n#{1,4}|\n\n|$)",
+                content,
+                re.IGNORECASE | re.MULTILINE | re.DOTALL
+            )
+            if findings_section:
+                section_text = findings_section.group(1)
+                section_findings = re.findall(r"(?:^|\n)[-•*]\s+(.+?)(?=\n|-|•|\*|$)", section_text, re.MULTILINE)
+                for finding in section_findings:
+                    if finding.strip() and not any(finding.lower() in f.lower() for f in key_findings):
+                        key_findings.append(finding.strip()[:180])
+        
+        # Fallback: Extract sentences with security keywords
+        if len(key_findings) < 2:
+            keywords = ['port', 'service', 'cve', 'vulnerability', 'expose', 'vulnerable', 
+                       'attack', 'technique', 'exploit', 'access', 'privilege', 'credential']
+            sentences = re.split(r'(?<=[.!?])\s+', content)
+            for sent in sentences:
+                if (30 < len(sent) < 250 and 
+                    any(kw in sent.lower() for kw in keywords) and
+                    not any(s.lower() == sent.lower() for s in key_findings)):
+                    key_findings.append(sent.strip()[:180])
+                    if len(key_findings) >= 3:
+                        break
+        
+        # Final fallback: Use summary as finding
+        if len(key_findings) < 1:
+            key_findings.append(f"{stage_name} stage analysis completed")
+        
+        # Deduplicate and limit
+        seen_findings = set()
+        key_findings = [
+            f for f in key_findings 
+            if not (f.lower() in seen_findings or seen_findings.add(f.lower()))
+        ][:6]
+        
+        # ===== SUMMARY EXTRACTION WITH FALLBACKS =====
+        summary = ""
+        
+        # Try to extract from Summary section
+        summary_section = re.search(
+            r"(?:^|\n)#{1,4}\s*summary[:\s]*\n(.*?)(?=\n#{1,4}|\n\n|$)",
+            content,
+            re.IGNORECASE | re.MULTILINE | re.DOTALL
+        )
+        if summary_section:
+            summary = summary_section.group(1).strip().split('\n')[0]
+        
+        # Fallback: Use first substantial line
+        if not summary:
+            lines = content.split("\n")
+            for line in lines:
+                line = line.strip()
+                if (line and 30 < len(line) < 300 and 
+                    not line.startswith("#") and 
+                    not line.startswith("-")):
+                    summary = line
+                    break
+        
+        # Final fallback: Generate from stage name
+        if not summary:
+            stage_summaries = {
+                1: "Passive reconnaissance and information gathering completed",
+                2: "Weaponization and payload creation for identified vulnerabilities",
+                3: "Payload delivery mechanism established",
+                4: "Vulnerability exploitation and initial access achieved",
+                5: "Persistence mechanisms and backdoors installed",
+                6: "Command and control communication channels established",
+                7: "Post-exploitation objectives executed"
+            }
+            summary = stage_summaries.get(stage_index, f"{stage_name} attack stage execution")
+        
+        # Limit summary to 200 chars
+        summary = str(summary)[:200]
+        
+        # ===== ARTIFACT TYPE INFERENCE =====
+        artifact_type = None
+        if artifact_name:
+            ext = artifact_name.lower().split('.')[-1] if '.' in artifact_name else ""
+            
+            if ext in ['exe', 'dll', 'sys', 'drv']:
+                artifact_type = "Windows PE Executable"
+            elif ext in ['sh', 'bash', 'elf', 'so', 'out']:
+                artifact_type = "Linux Executable/Script"
+            elif ext in ['ps1', 'bat', 'cmd', 'vbs']:
+                artifact_type = "Windows Script"
+            elif ext in ['py', 'rb', 'pl', 'js', 'php', 'jar']:
+                artifact_type = "Script"
+            elif ext in ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'pdf']:
+                artifact_type = "Malicious Document"
+            elif ext in ['zip', 'rar', '7z', 'tar', 'gz']:
+                artifact_type = "Compressed Archive"
+            else:
+                artifact_type = "Malware/Payload"
         
         return StageAnalysis(
             stage_index=stage_index,
             stage_name=stage_name,
             phase=meta.get("phase", phase),
             mitre_techniques=meta.get("techniques", []),
-            summary=summary[:150],  # Limit to 150 chars
-            key_findings=key_findings[:5],  # Top 5 findings
-            tools_used=list(set(tools))[:5],  # Top 5 tools
+            summary=summary,
+            key_findings=key_findings,
+            tools_used=tools,
             artifact_name=artifact_name,
-            artifact_type="Malware/Payload" if artifact_name else None,
-            commands=commands[:10],  # Top 10 commands
+            artifact_type=artifact_type,
+            commands=commands,
             content=content
         )
     

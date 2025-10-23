@@ -2,459 +2,449 @@
 
 ## System Overview
 
-The AI Engine is a FastAPI-based service that performs sophisticated cybersecurity analysis through a 7-stage attack path generation system. It uses advanced context threading to maintain logical continuity across all stages while incorporating intelligent continuity validation.
+The Attack Path Engine is a FastAPI-based service that transforms vulnerability data into 7-stage attack path sequences. It accepts 50+ optional host parameters (platform, services, vulnerabilities, security controls, etc.) and generates a coherent, detailed attack narrative with continuity validation across all stages.
 
-## Architecture Diagram
+## Core Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/attack-path/main` | **PRIMARY**: Generate 7-stage attack path (JSON response) |
+| `GET` | `/health` | Health check for monitoring and service discovery |
+
+## Component Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  FastAPI Application                 │
-│                   (Port 8000)                        │
-└──────────────────────┬──────────────────────────────┘
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-    ┌───▼────┐    ┌───▼────┐    ┌───▼────┐
-    │ POST   │    │ GET    │    │ Health │
-    │/analyze│    │/status │    │ /ready │
-    └────┬───┘    └────────┘    └────────┘
-         │
-    ┌────▼────────────────────────────┐
-    │  CompleteAnalyzer Service        │
-    │  (Orchestration & Context)       │
-    └────┬────────────────────┬────────┘
-         │                    │
-    ┌────▼──────────┐   ┌────▼──────────────────┐
-    │  LLMClient    │   │ ContinuityValidator   │
-    │  (OpenAI API) │   │ (Validation Logic)    │
-    └───────────────┘   └──────────────────────┘
-         │
-    ┌────▼────────────────────────────┐
-    │   AttackContext               │
-    │   (Shared State Threading)    │
-    └───────────────────────────────┘
+┌────────────────────────────────────────┐
+│      FastAPI Application               │
+│      (app/main.py)                     │
+│      Port 8000                         │
+└──────────────┬───────────────────────┘
+               │
+        ┌──────▼────────┐
+        │ POST /attack- │
+        │ path/main     │
+        └──────┬────────┘
+               │
+        ┌──────▼───────────────────────┐
+        │  CompleteAnalyzer Service     │
+        │  (app/services/              │
+        │   complete_analyzer.py)       │
+        │                              │
+        │  - Orchestrates 7 LLM calls  │
+        │  - Context threading         │
+        │  - Artifact extraction       │
+        └──────┬──────────────┬────────┘
+               │              │
+        ┌──────▼───────┐   ┌──▼─────────────────┐
+        │ LLMClient    │   │ ContinuityValidator│
+        │ (app/        │   │ (app/utils/)       │
+        │  services/   │   │                    │
+        │  llm_client  │   │ 4 validation checks│
+        │  .py)        │   └────────────────────┘
+        │              │
+        │ 7 sequential │
+        │ API calls    │
+        └──────────────┘
 ```
 
-## Core Components
+## Input: InputHost Model
 
-### 1. FastAPI Application (`app/main.py`)
+**Purpose**: Accept 50+ optional host parameters from vulnerability scanners
 
-**Purpose**: HTTP request/response handling
+**12 Parameter Categories**:
 
-**Endpoints**:
-- `POST /analyze` - Initiate security analysis
-- `GET /status` - System status
-- `GET /ready` - Health check
+1. **Core System Info** (2 params)
+   - `platform`: OS type (Linux, Windows, macOS, etc.)
+   - `version_os`: OS version (Ubuntu 20.04, Windows Server 2019, etc.)
 
-**Configuration**: 
-- Loaded from `app/config.py`
-- Environment variables via `.env`
-- CORS headers for cross-origin requests
+2. **Network & Services** (3 params)
+   - `open_ports`: List of open ports
+   - `services`: Running services with versions
+   - `vulnerabilities`: Known CVEs and descriptions
 
-### 2. CompleteAnalyzer Service (`app/services/complete_analyzer.py`)
+3. **Asset Identification** (5 params)
+   - `asset_id`, `asset_name`, `mac_addresses`, `ip_addresses`, `fqdn`
 
-**Purpose**: Orchestrates 7-stage generation with context threading
+4. **Network Context** (3 params)
+   - `network_segment`: DMZ, Internal, Public-facing, etc.
+   - `internet_exposed`: Boolean - is publicly accessible
+   - `firewall_rules`: Applicable firewall rules
 
-**Key Methods**:
-- `analyze(request)` → CompleteAnalysisResponse
-  - Validates input
-  - Generates all 7 stages
-  - Runs continuity validation
-  - Returns comprehensive response
+5. **Security Controls** (5 params)
+   - `security_controls`: EDR, firewalls, DLP tools, etc.
+   - `edr_agent`: EDR/antivirus status
+   - `antivirus_status`, `firewall_status`, `encryption_status`
 
-- `_generate_attack_path_with_continuity()` → List[StageAnalysis]
-  - Sequential 7-stage LLM generation
-  - Accumulates context through AttackContext
-  - Parses and validates each stage
+6. **Identity & Access** (7 params)
+   - `domain_membership`, `organizational_unit`, `user_accounts`, `admin_accounts`, `service_accounts`
+   - `mfa_enabled`, `password_policy`
 
-- `_extract_artifact_name(content, stage_index)` → Optional[str]
-  - 4-priority fallback strategy
-  - Code blocks → Explicit → Uploads → References
+7. **Software & Applications** (4 params)
+   - `installed_software`, `browser_extensions`, `database_software`, `development_tools`
 
-- `_parse_stage_response(response_text, stage_index)` → StageAnalysis
-  - Parses LLM markdown output
-  - Extracts all fields (techniques, findings, tools, etc.)
-  - Calls artifact extraction
+8. **Patch & Vulnerability** (5 params)
+   - `patch_level`, `missing_patches`, `os_end_of_life`, `vulnerability_score`, `critical_vuln_count`
 
-- `_update_stage_artifacts(context, primary_path)`
-  - Populates stage_artifacts dict
-  - Tracks artifact usage across 7 stages
+9. **Configuration & Compliance** (3 params)
+   - `configurations`: Security misconfigurations
+   - `compliance_gaps`: PCI, HIPAA, SOC2 violations
+   - `security_recommendations`
 
-**Data Flow**:
-```
-User Request
+10. **Asset Context & Risk** (4 params)
+    - `asset_criticality`, `business_role`, `data_classification`, `environment`
+
+11. **Cloud & Containers** (5 params)
+    - `cloud_provider`, `cloud_instance_type`, `cloud_iam_roles`, `container_runtime`, `kubernetes_cluster`
+
+12. **Backup & Storage** (2 params)
+    - `backup_system`, `backup_location`
+
+13. **Threat Intelligence** (2 params)
+    - `threat_intel_matches`, `known_exploits`
+
+**Design**: All fields are optional, allowing flexible input from any vulnerability scanner or CMDB
+
+## Processing Flow
+
+```bash
+1. POST /attack-path/main with InputHost
     ↓
-Validate Input
+2. Pydantic validates all 50+ optional fields
     ↓
-Create AttackContext
+3. CompleteAnalyzer.analyze(host) begins
+    ├─ Create AttackContext + request_id + timestamp
+    ├─ Initialize execution timer
     ↓
-Stage 1: Reconnaissance (context empty)
+4. Stage 1: Reconnaissance (LLM call #1)
+    ├─ Prompt includes: InputHost context
+    ├─ LLM generates markdown response
+    ├─ Parse into StageAnalysis object
+    ├─ Extract: techniques, summary, findings, tools
+    ├─ Log tokens used
     ↓
-Stage 2: Weaponization (context + stage 1)
+5. Stages 2-7 (LLM calls #2-7) with context accumulation
+    ├─ Stage N prompt includes: InputHost + outputs from stages 1..N-1
+    ├─ Parse response to StageAnalysis
+    ├─ Extract artifact_name (4-priority pattern matching)
+    ├─ Log tokens per stage
     ↓
-Stage 3: Delivery (context + stages 1-2)
+6. Parse Complete
+    ├─ 7x StageAnalysis objects now available
+    ├─ Calculate total tokens, execution time
+    ├─ Estimate cost
     ↓
-[... stages 4-7 similar pattern ...]
+7. Run ContinuityValidator
+    ├─ Check 1: Artifact continuity (Stage 2 → 3-7)
+    ├─ Check 2: Vulnerability continuity (Stage 1 → 2-4)
+    ├─ Check 3: Technique alignment (kill chain order)
+    ├─ Check 4: Tool consistency (OS/environment match)
+    ├─ Aggregate results into validation_report
     ↓
-Parse all stages
+8. Build CompleteAnalysisResponse
+    ├─ primary_path: [Stage1, Stage2, ..., Stage7]
+    ├─ request_id: Unique identifier
+    ├─ execution_time_seconds: Total time
+    ├─ llm_calls: {total: 7}
+    ├─ estimated_cost: Calculated USD
+    ├─ validation_report: Continuity check results
     ↓
-Run ContinuityValidator
-    ↓
-Return CompleteAnalysisResponse
+9. Return JSON to client (HTTP 200)
 ```
 
-### 3. LLMClient (`app/services/llm_client.py`)
+## Context Threading Strategy
 
-**Purpose**: OpenAI API integration
+Each stage receives **cumulative** context from prior stages:
 
-**Methods**:
-- `generate(prompt, temperature, max_tokens)` → str
-  - Sends requests to OpenAI
-  - Handles retries and errors
-  - Logs token usage
+```bash
+Input: InputHost (50+ params)
 
-**Configuration**:
-- Model: `OPENAI_MODEL` (default: gpt-4o-mini)
-- Temperature: 0.7 (balanced creativity/consistency)
-- Max tokens: Per-stage limit
-- Timeout: 30s per request
+Stage 1: Reconnaissance
+├─ Reads: InputHost raw data
+├─ Outputs: Services found, CVEs identified, attack surface
+└─ Result → AttackContext
 
-### 4. ContinuityValidator (`app/utils/continuity_validator.py`)
+Stage 2: Weaponization
+├─ Reads: InputHost + Stage 1 findings
+├─ Uses context to select exploits for identified services/CVEs
+├─ Outputs: Payload name, exploitation strategy
+└─ Result → AttackContext
 
-**Purpose**: Cross-stage coherence validation
+Stage 3-7: Cascade pattern
+├─ Each receives ALL prior stages' outputs
+├─ Builds logically coherent attack narrative
+├─ Prevents LLM hallucinations (if stage 2 made up a CVE, it breaks here)
+└─ Result → AttackContext
 
-**Validation Checks**:
-
-1. **Artifact Continuity** (`_check_artifact_continuity`)
-   - Validates Stage 2 payload referenced in Stages 3-7
-   - Ensures weapon remains consistent
-   - Returns: pass/warning/fail
-
-2. **Vulnerability Continuity** (`_check_vulnerability_continuity`)
-   - Validates CVE from Stage 1 flows through Stages 2-4
-   - Ensures exploitation aligns with vuln
-   - Returns: pass/warning/fail
-
-3. **Technique Alignment** (`_check_technique_alignment`)
-   - Validates MITRE ATT&CK techniques logical progression
-   - Ensures techniques align with cyber kill chain
-   - Returns: pass/warning/fail
-
-4. **Tool Consistency** (`_check_tool_consistency`)
-   - Validates compatible tool usage across stages
-   - Ensures tool chains make sense
-   - Returns: pass/warning/fail
-
-**Output**:
-```python
-{
-    "is_valid": bool,
-    "total_checks": int,
-    "passes": List[str],
-    "warnings": List[str],
-    "stage_artifacts": Dict[int, Optional[str]]
-}
+Outcome: Coherent 7-stage attack path
 ```
 
-### 5. Data Models (`app/models/`)
+## Artifact Extraction (4-Priority Strategy)
 
-**AttackContext** (`attack_context.py`)
-- Shared state threaded through all 7 stages
-- Accumulates outputs for context
-- Tracks artifact names per stage
-- Properties:
-  - `initial_target` - Starting input
-  - `stage_outputs` - Dict[int, StageAnalysis]
-  - `stage_artifacts` - Dict[int, Optional[str]]
-
-**CompleteAnalysisResponse** (`complete_analysis.py`)
-- Final API response structure
-- Contains all 7 stage analyses
-- Includes validation_report
-- Properties:
-  - `primary_path` - Ordered stages 1-7
-  - `validation_report` - Continuity validation results
-  - `model_used` - Which GPT model processed request
-  - `total_tokens` - Token usage summary
-
-### 6. Core Prompts (`app/core/prompts.py`)
-
-**Purpose**: Stage-specific LLM prompts
-
-**Stages** (with example prompts):
-1. **Reconnaissance** - Target analysis, vulnerability research
-2. **Weaponization** - Exploit creation, payload development
-3. **Delivery** - Distribution method planning
-4. **Exploitation** - Attack execution strategy
-5. **Installation** - Persistence mechanisms
-6. **Command & Control** - C2 communication setup
-7. **Actions on Objectives** - Post-exploitation goals
-
-Each prompt:
-- References prior stages in context
-- Specifies output format (markdown)
-- Includes constraints and guidelines
-- Optimized for consistency
-
-### 7. Configuration (`app/config.py`)
-
-**Settings**:
-- `DEBUG` - Debug mode (bool)
-- `LOG_LEVEL` - Logging level (DEBUG/INFO/WARNING/ERROR)
-- `OPENAI_API_KEY` - API authentication
-- `OPENAI_MODEL` - Model selection
-- `REQUEST_TIMEOUT_SECONDS` - Request timeout
-- `MAX_TOKENS_PER_STAGE` - Token limits
-- `TEMPERATURE` - LLM temperature (creativity)
-
-## Data Flow
-
-### Request Processing
+Extracts artifact names from Stage 2+ with fallback patterns:
 
 ```
-1. User sends POST /analyze
-   ├─ Headers: Content-Type: application/json
-   └─ Body: { target: "...", context: "..." }
-
-2. FastAPI validates request
-   ├─ Pydantic validation
-   └─ Rejects if schema invalid
-
-3. CompleteAnalyzer.analyze()
-   ├─ Creates AttackContext
-   ├─ Builds 7 stage prompts
-   ├─ Calls LLMClient 7 times
-   │  ├─ Stage 1 (no context)
-   │  ├─ Stage 2 (+ stage 1)
-   │  ├─ Stage 3 (+ stages 1-2)
-   │  └─ ... stages 4-7 similar
-   ├─ Parses all responses
-   ├─ Extracts artifacts
-   ├─ Runs validation
-   └─ Returns response
-
-4. Response delivered to client
-   ├─ Headers: Content-Type: application/json
-   └─ Body: CompleteAnalysisResponse (JSON)
-```
-
-### Context Threading
-
-Each stage LLM call receives accumulated context:
-
-```
-Stage 1 Prompt
-├─ Input: target description
-└─ Output: reconnaissance findings
-
-Stage 2 Prompt
-├─ Input: target + stage 1 findings
-└─ Output: weaponization strategy
-
-Stage 3 Prompt
-├─ Input: target + stages 1-2 findings
-└─ Output: delivery method
-
-[Pattern continues through Stage 7]
-
-Final Output: Coherent 7-stage attack path
-```
-
-## Artifact Extraction Strategy
-
-4-priority fallback ensures high accuracy:
-
-```
-Priority 1: Code Blocks (Highest Confidence)
+Priority 1: Code Block Commands (95% confidence)
 ├─ msfvenom -o <filename>
 ├─ curl -O <filename>
 ├─ wget <filename>
-├─ PowerShell -O <filename>
-└─ Common exploit frameworks
+├─ PowerShell -OutFile C:\file.exe
+└─ Match pattern in LLM output
 
-Priority 2: Explicit Naming (High Confidence)
-├─ "named: <filename>"
-├─ "created: <filename>"
-├─ "called: <filename>"
-└─ Explicit mention patterns
+Priority 2: Explicit Naming (85% confidence)
+├─ "named: payload.exe"
+├─ "created file.sh"
+├─ "artifact: malware.bin"
+└─ Match explicit declaration patterns
 
-Priority 3: Upload/Transfer (Medium Confidence)
-├─ "upload <filename>"
-├─ "scp <filename>"
-├─ "copy <filename>"
-└─ Transfer patterns
+Priority 3: Upload/Transfer Commands (70% confidence)
+├─ "upload /path/to/payload.exe"
+├─ "scp malware.bin to target"
+├─ "copy payload.exe"
+└─ Match transfer operation patterns
 
-Priority 4: Prior References (Lower Confidence)
-├─ "from stage <n>"
-├─ "the payload created earlier"
-├─ "using <artifact-from-prior>"
-└─ Reference patterns
+Priority 4: Prior Stage References (60% confidence)
+├─ "from Stage 2 exploitation"
+├─ "created earlier in weaponization"
+├─ "reference to Stage 2 artifact"
+└─ Match continuity reference patterns
+
+Result: ~95% artifact detection accuracy
 ```
 
-## Validation Pipeline
+## Continuity Validation (4 Checks)
+
+Validates cross-stage coherence:
 
 ```
-Parsed Stages
-    ↓
-Artifact Continuity
-├─ Stage 2 artifact exists?
-├─ Referenced in stages 3+?
-└─ Consistent naming?
-    ↓
-Vulnerability Continuity
-├─ CVE from stage 1?
-├─ Exploited in stage 4?
-├─ Logically sound?
-└─ Tool matches?
-    ↓
-Technique Alignment
-├─ Valid MITRE ATT&CK?
-├─ Progression logical?
-├─ Kill chain aligned?
-└─ Stage appropriate?
-    ↓
-Tool Consistency
-├─ Tools compatible?
-├─ Environment match?
-├─ Availability correct?
-└─ Version compatible?
-    ↓
-Validation Report
-└─ is_valid: true/false
+Check 1: Artifact Continuity
+├─ Does Stage 2 have artifact_name?
+├─ Is same artifact referenced in stages 3-7?
+├─ Is naming consistent across all uses?
+└─ Result: PASS/WARNING/FAIL
+
+Check 2: Vulnerability Continuity
+├─ Does Stage 1 identify a CVE?
+├─ Is same CVE exploited in Stage 2/4?
+├─ Does exploit match the CVE?
+└─ Result: PASS/WARNING/FAIL
+
+Check 3: Technique Alignment
+├─ Extract MITRE ATT&CK techniques from all stages
+├─ Do techniques follow logical progression?
+├─ Are techniques stage-appropriate?
+└─ Result: PASS/WARNING/FAIL
+
+Check 4: Tool Consistency
+├─ Are tools compatible with target OS?
+├─ Do tool dependencies align?
+├─ Is environment (Linux/Windows) consistent?
+└─ Result: PASS/WARNING/FAIL
+
+Output: validation_report
+├─ is_valid: true (all 4 pass) or false (any fail)
+├─ total_checks: 4
+├─ passes: [list of passed checks]
+├─ warnings: [list of issues]
+└─ stage_artifacts: {1: null, 2: "payload.exe", 3: "payload.exe", ...}
+```
+
+## Output: CompleteAnalysisResponse
+
+```json
+{
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "primary_path": [
+    {
+      "stage_index": 1,
+      "stage_name": "Reconnaissance",
+      "phase": "Information Gathering",
+      "mitre_techniques": ["T1595", "T1592"],
+      "summary": "Identified open SMB ports 139/445 with MS17-010 vulnerability",
+      "key_findings": ["Port 139 exposed", "Port 445 exposed", "MS17-010 vulnerable"],
+      "tools_used": ["nmap", "shodan"],
+      "artifact_name": null,
+      "artifact_type": null,
+      "commands": ["nmap -sV 10.0.1.50"],
+      "content": "## Reconnaissance\nFull markdown content here..."
+    },
+    {
+      "stage_index": 2,
+      "stage_name": "Weaponization",
+      ...
+      "artifact_name": "eternalblue_payload.exe",
+      "artifact_type": "Windows PE Executable",
+      ...
+    },
+    // Stages 3-7 similar structure
+  ],
+  "total_paths": 1,
+  "execution_time_seconds": 22.4,
+  "llm_calls": {"total": 7},
+  "estimated_cost": 0.051,
+  "validation_report": {
+    "is_valid": true,
+    "total_checks": 4,
+    "passes": [
+      {"stage": 2, "check": "artifact_continuity", "result": "PASS"},
+      {"stage": 1, "check": "vulnerability_continuity", "result": "PASS"},
+      {"stage": 5, "check": "technique_alignment", "result": "PASS"},
+      {"stage": 4, "check": "tool_consistency", "result": "PASS"}
+    ],
+    "warnings": [],
+    "stage_artifacts": {
+      "1": null,
+      "2": "eternalblue_payload.exe",
+      "3": "eternalblue_payload.exe",
+      "4": "eternalblue_payload.exe",
+      "5": "eternalblue_payload.exe",
+      "6": null,
+      "7": null
+    }
+  }
+}
 ```
 
 ## Technology Stack
 
 ### Core Framework
-- **FastAPI 0.100+**: Modern async web framework
-- **Pydantic 2.0+**: Data validation with Python types
-- **Python 3.10+**: Runtime with async/await
+- **FastAPI 0.100+**: Async web framework with auto-generated OpenAPI docs
+- **Pydantic 2.0+**: Data validation with Python type hints
+- **Python 3.10+**: Runtime with asyncio support
+- **Uvicorn**: ASGI application server
 
-### External Services
-- **OpenAI API**: GPT-4o-mini LLM model
-- **OpenAI Python Client**: SDK for API integration
+### LLM Integration
+- **LiteLLM**: Multi-provider LLM wrapper library
+  - Supports 100+ models (OpenAI, Anthropic, Google, Azure, local Ollama, etc.)
+  - Default: OpenAI `gpt-4o-mini` via LiteLLM
+- **Token Counting**: Built-in usage tracking
 
-### Development Tools
-- **Pytest**: Testing framework
-- **Black**: Code formatter
-- **Ruff**: Linter
-- **Mypy**: Type checker (optional)
+### Utilities
+- **python-dotenv**: Environment variable loading from .env
 
 ### Deployment
 - **Docker**: Container orchestration
-- **Docker Compose**: Multi-container management
-- **Gunicorn**: Production WSGI server
+- **Docker Compose**: Multi-container setup for local development
+- **Gunicorn + Uvicorn**: Production ASGI server setup
 
 ## Performance Characteristics
 
-### Typical Request Timeline
-- Input validation: 10ms
-- LLM generation (7 stages): 10-20s (90% of total time)
-- Parsing & validation: 500ms
-- Response serialization: 10ms
-- **Total: 10-20 seconds**
+### Request Timing (typical 20-second run)
+- Input validation: 10-50ms (Pydantic)
+- Stage 1 LLM: 2-4s
+- Stages 2-7 (6x): 12-18s total
+- Response parsing: 200-500ms
+- Validation checks: 100-300ms
+- JSON serialization: 10-50ms
+- **Total: 15-25 seconds** (average: ~20s)
 
 ### Token Usage
-- Per-request: 5-15k tokens typically
-- Per-stage average: 1-2k tokens
-- Input tokens: 30-40% of total
-- Output tokens: 60-70% of total
+- Per-request: 8,000-15,000 tokens (varies by input complexity)
+- Per-stage: 1,000-2,500 tokens
+- Input composition: ~40% input tokens
+- Output composition: ~60% output tokens
+- **Estimated cost**: $0.015-$0.050 per request (GPT-4o-mini rates)
 
 ### Scalability
-- Single instance: ~3-5 concurrent requests
-- CPU: Minimal (mostly I/O waiting)
-- Memory: ~300MB base + 100MB per request
-- Network: Limited by OpenAI rate limits
+- **Single instance**: 3-5 concurrent requests (I/O bound on LLM API)
+- **CPU usage**: Minimal (mostly waiting on LLM)
+- **Memory**: ~200MB base + ~50MB per concurrent request
+- **Bottleneck**: LLM provider rate limits
 
 ## Security Architecture
 
 ### API Key Management
-- Stored in `.env` file (never committed)
-- Loaded into environment at runtime
-- Never logged or exposed in errors
-- See [SECURITY.md](../SECURITY.md)
+- `OPENAI_API_KEY` in `.env` (local) or environment variable (production)
+- `.env` file in `.gitignore` (never committed)
+- Key validated at startup if configured
+- Never logged or exposed in responses
+- Token usage logged separately (no keys in logs)
 
 ### Input Validation
-- Pydantic models enforce schema
-- Max length limits on all fields
-- Type checking on all inputs
-- Sanitization before LLM calls
+- Pydantic validates all 50+ InputHost fields
+- Type hints enforce type safety
+- String length limits via Field descriptions
+- No SQL injection (no database yet)
+- LLM injection risk mitigated by context separation
 
 ### Output Handling
-- No sensitive data in logs
-- Error messages generic (no internal details)
-- Response includes only necessary data
-- No PII preserved between requests
+- Response contains only analysis results (7x StageAnalysis)
+- No sensitive input data echoed back
+- Error messages are generic (no stack traces)
+- Request IDs for tracing without data exposure
 
 ### Rate Limiting
-- Implement at API gateway level
-- Per-IP rate limits (recommended)
-- Per-key limits (future)
-- Graceful degradation on limits
+- Implement at reverse proxy (Nginx, Kong, etc.) or API gateway
+- Per-IP or per-API-key rate limiting recommended
+- LLM provider rate limits: 100K tokens/min (OpenAI pro), 3.5K (free)
+
+## 7-Stage Attack Path (Cyber Kill Chain)
+
+| Stage | Name | Purpose | Example Output |
+|-------|------|---------|-----------------|
+| 1 | Reconnaissance | Target analysis, service enumeration | Open ports, services, CVEs |
+| 2 | Weaponization | Exploit selection, payload creation | Payload name, exploitation method |
+| 3 | Delivery | Distribution vector | Delivery method, C2 infrastructure |
+| 4 | Exploitation | Payload delivery and execution | Exploitation steps, target system |
+| 5 | Installation | Persistence mechanism | Persistence method, backdoor setup |
+| 6 | Command & Control | C2 communication | C2 infrastructure, communication protocol |
+| 7 | Actions on Objectives | Post-exploitation goals | Data exfiltration, lateral movement |
 
 ## Extension Points
 
-### Adding New Stages
-1. Add stage prompt in `app/core/prompts.py`
-2. Extend `_generate_attack_path_with_continuity()` loop
-3. Update context threading logic
-4. Extend `StageAnalysis` if needed
-5. Add validation rule in `ContinuityValidator`
+### Adding New Parameters
+1. Add field to `InputHost` model in `app/models/host.py`
+2. Use Pydantic `Field()` with description and examples
+3. Update prompt in `app/core/prompts.py` to reference new data
+4. Test end-to-end
 
 ### Changing LLM Models
-1. Update `OPENAI_MODEL` in config
-2. Adjust token limits if needed
-3. Test prompt effectiveness
-4. Update documentation
+1. Set `LLM_MODEL` environment variable
+2. LiteLLM automatically handles provider differences
+3. Examples: `claude-3-5-sonnet-20241022`, `gemini/gemini-1.5-pro`, `ollama/llama2`
+4. Requires corresponding API key in environment
 
-### Custom Validation Rules
-1. Extend `ContinuityValidator` with new `_check_*` method
+### Adding Validation Checks
+1. Add method to `ContinuityValidator` class
 2. Call from `validate()` orchestrator
-3. Add results to report dict
-4. Document in validation section
-
-### Alternative LLM Providers
-1. Create new service: `LlamaClient`, `AnthropicClient`, etc.
-2. Implement same interface as `LLMClient`
-3. Update `CompleteAnalyzer` to use new provider
-4. Test prompt compatibility
-5. Document configuration
+3. Return check results
+4. Document validation logic
 
 ## Future Roadmap
 
-### Planned Improvements
-- [ ] Multi-provider LLM support (Anthropic, Llama)
+### Near Term
+- [ ] Response caching (Redis) for identical inputs
 - [ ] Prompt optimization pipeline
-- [ ] Response caching layer
-- [ ] Database persistence
-- [ ] Web UI frontend
-- [ ] Advanced analytics dashboard
-- [ ] Batch analysis mode
+- [ ] Cost reduction strategies
+- [ ] Web UI for interactive analysis
+
+### Medium Term
+- [ ] PostgreSQL integration for analysis history
+- [ ] Analytics dashboard with trends
+- [ ] Parallel stage generation (async)
+- [ ] Webhook callbacks for long-running analyses
+
+### Long Term
+- [ ] Kubernetes deployment
+- [ ] Horizontal scaling infrastructure
+- [ ] Request queuing and job workers
 - [ ] Custom validation rules engine
-
-### Scalability Enhancements
-- [ ] Horizontal scaling with load balancer
-- [ ] Request queuing system
-- [ ] Cache layer (Redis)
-- [ ] Async job processing
-- [ ] Database integration
-
-### Operational Features
-- [ ] Monitoring/alerting integration
-- [ ] Audit logging
-- [ ] Usage analytics
-- [ ] Cost tracking
-- [ ] Performance metrics
+- [ ] API client libraries (Python, JS, Go)
 
 ## Related Documentation
 
-- [API Reference](API.md) - Endpoint documentation
-- [Development Guide](DEVELOPMENT.md) - Local setup
-- [Deployment Guide](DEPLOYMENT.md) - Production procedures
+- [API Reference](API.md) - Endpoint documentation with examples
+- [Development Guide](DEVELOPMENT.md) - Local setup and testing
+- [Deployment Guide](DEPLOYMENT.md) - Production deployment
 - [Operational Runbook](RUNBOOK.md) - Day-to-day operations
-- [Architecture Decisions](adr/0002-continuity-validation-design.md)
+- [Security Guide](../SECURITY.md) - Security best practices
+- [Contributing Guide](../CONTRIBUTING.md) - Development workflow
+- [Support Guide](../SUPPORT.md) - FAQ and troubleshooting
+- [Architecture Decisions](adr/) - Design decisions
+  - [ADR-0001: Record Architecture Decisions](adr/0001-record-architecture-decisions.md)
+  - [ADR-0002: Continuity Validation Design](adr/0002-continuity-validation-design.md)
 
 ---
 
-Last updated: 2024
-Maintained by: AI Engine Team
+Last updated: October 2025
+Accurate as of: AI Engine v1.0.0
+Phases Complete: 1, 2, 3 (Artifact Extraction, Tracking, Validation)

@@ -392,85 +392,152 @@ Generate a realistic, context-aware attack sequence now."""
     @staticmethod
     def build_reconnaissance_prompt(host: InputHost) -> str:
         """
-        Stage 1: Reconnaissance (no prior context needed).
+        Stage 1: Reconnaissance - COLLECTOR DATA ANALYSIS ONLY.
         
-        Initiates the attack path with passive intelligence gathering.
-        No prior stages to reference.
+        Stage 1 is NOT active reconnaissance and does NOT plan attacks.
+        All data comes from external collectors, AD, scanners, and audit tools.
+        This stage ONLY ANALYZES the collected data - no procedures, no attacks,
+        no strategies. That comes in Stages 2-7.
         """
         pb = PromptBuilder
         
         sections = []
         
-        # Core system info
-        if host.platform or host.version_os:
-            core_info = []
-            if host.platform:
-                core_info.append(f"- Platform: {host.platform}")
-            if host.version_os:
-                core_info.append(f"- OS Version: {host.version_os}")
-            if host.os_end_of_life:
-                core_info.append(f"- ⚠️ OS END-OF-LIFE: Unsupported version")
-            sections.append("TARGET SYSTEM:\n" + "\n".join(core_info))
-        
-        # Network exposure
-        network_info = []
-        if host.internet_exposed is not None:
-            exposure = "Internet-exposed 🌐" if host.internet_exposed else "Internal only"
-            network_info.append(f"- Exposure: {exposure}")
+        # Collector data received
+        collector_summary = []
+        if host.platform:
+            collector_summary.append(f"Platform: {host.platform}")
+        if host.version_os:
+            collector_summary.append(f"OS Version: {host.version_os}")
         if host.open_ports:
-            network_info.append(f"- Open Ports: {', '.join(map(str, host.open_ports))}")
+            collector_summary.append(f"Open Ports: {', '.join(map(str, host.open_ports))}")
         if host.services:
-            network_info.append(f"- Services: {pb._format_list(host.services)}")
-        if network_info:
-            sections.append("NETWORK SURFACE:\n" + "\n".join(network_info))
-        
-        # Vulnerabilities
+            collector_summary.append(f"Services Running: {len(host.services)} detected")
         if host.vulnerabilities:
-            sections.append(f"KNOWN VULNERABILITIES: {pb._format_list(host.vulnerabilities)}")
+            collector_summary.append(f"Vulnerabilities Found: {len(host.vulnerabilities)}")
+        if host.vulnerability_score is not None:
+            collector_summary.append(f"Vulnerability Score: {host.vulnerability_score}")
+        if host.internet_exposed is not None:
+            exposure = "Internet-exposed" if host.internet_exposed else "Internal network"
+            collector_summary.append(f"Exposure: {exposure}")
         
-        # Security controls
-        security_info = []
+        if collector_summary:
+            sections.append("COLLECTOR DATA SUMMARY:\n" + "\n".join(collector_summary))
+        
+        # Actual findings from collector
+        findings = []
+        if host.platform:
+            findings.append(f"1. Platform: {host.platform}")
+        if host.version_os:
+            findings.append(f"2. OS Version: {host.version_os}")
+        if host.open_ports:
+            findings.append(f"3. Open Ports: {', '.join(map(str, host.open_ports))}")
+        if host.services:
+            findings.append(f"4. Services: {pb._format_list(host.services)}")
+        if host.vulnerabilities:
+            findings.append(f"5. Known Vulnerabilities: {pb._format_list(host.vulnerabilities)}")
+        if host.security_controls:
+            findings.append(f"6. Security Controls: {pb._format_list(host.security_controls)}")
         if host.edr_agent:
-            security_info.append(f"- EDR: {host.edr_agent}")
+            findings.append(f"7. EDR Agent: {host.edr_agent}")
         if host.firewall_status:
-            security_info.append(f"- Firewall: {host.firewall_status}")
-        if security_info:
-            sections.append("SECURITY CONTROLS:\n" + "\n".join(security_info))
+            findings.append(f"8. Firewall: {host.firewall_status}")
+        if host.antivirus_status:
+            findings.append(f"9. Antivirus: {host.antivirus_status}")
+        if host.asset_criticality:
+            findings.append(f"10. Asset Criticality: {host.asset_criticality}")
         
-        target_info = "\n\n".join(sections) if sections else "Minimal information available"
+        if findings:
+            sections.append("COLLECTOR FINDINGS:\n" + "\n".join(findings))
         
-        return f"""STAGE 1: RECONNAISSANCE
+        target_info = "\n\n".join(sections) if sections else "No collector data provided"
+        
+        return f"""STAGE 1: RECONNAISSANCE - COLLECTOR DATA ANALYSIS
 
-Target Information:
+⚠️  CRITICAL: This stage ONLY ANALYZES collector data.
+NO active scanning. NO procedures. NO attack strategies.
+Stages 2-7 will handle planning based on this analysis.
+
+COLLECTOR DATA RECEIVED:
 {target_info}
 
-YOUR TASK:
-1. Analyze the target to identify exposed services, vulnerabilities, and attack surface
-2. Use passive reconnaissance techniques (MITRE T1595, T1592, T1598)
-3. Determine the most promising attack vectors based on discovered information
-4. Map findings to MITRE ATT&CK techniques
+YOUR TASK - ANALYSIS ONLY (Do NOT plan attacks):
 
-Output: One detailed string describing reconnaissance findings, discovered attack vectors, and initial assessment."""
+1. Summarize what the collector found
+   - What platform?
+   - What OS version?
+   - What services are running?
+   - What vulnerabilities were detected?
+   - What security controls are in place?
+
+2. Categorize the findings
+   - Vulnerabilities by type (access control, RCE, credential access, etc.)
+   - Services by risk level (critical, high, medium, low)
+   - Security controls that are present
+
+3. Map to MITRE reconnaissance techniques (information gathering only)
+   - T1595: Active Scanning (if collector did active scanning)
+   - T1592: Gather Victim Host Information
+   - T1598: Phishing for Information (if applicable)
+
+4. Document data quality
+   - How complete is the data?
+   - What gaps exist?
+   - What can we conclude from this data?
+
+CRITICAL RULES - DO NOT VIOLATE:
+❌ DO NOT plan attack methods
+❌ DO NOT suggest attack techniques
+❌ DO NOT list tools to use for attacking
+❌ DO NOT suggest evasion approaches
+❌ DO NOT describe ways to compromise findings
+❌ DO NOT suggest access escalation paths
+❌ DO NOT suggest movement within network
+
+✅ DO ONLY:
+✓ Summarize what was found
+✓ Categorize findings by type
+✓ Note the platform and OS
+✓ List vulnerabilities as reported by collector
+✓ List services as reported by collector
+✓ List security controls as reported by collector
+✓ Map to reconnaissance MITRE techniques
+✓ End with: "This analysis will inform attack planning in subsequent stages"
+
+Output Format:
+- Start with 1-2 sentence summary of collector findings
+- List all key findings from the data
+- Categorize by type (vulnerabilities, services, controls, assets)
+- Map to MITRE T#### techniques (reconnaissance phase only)
+- End with acknowledgment that analysis is complete
+
+REMEMBER:
+- Stage 1 = Analysis of what was collected
+- Stages 2-7 = Attack planning and execution
+- Your job = Report findings, not plan actions"""
     
     @staticmethod
     def build_weaponization_prompt(host: InputHost, context: AttackContext) -> str:
         """
-        Stage 2: Weaponization WITH PRIOR RECONNAISSANCE FINDINGS.
+        Stage 2: Weaponization - PLATFORM-SPECIFIC PAYLOAD CREATION.
         
-        Creates weaponized payloads specific to what reconnaissance discovered.
-        Must reference vulnerabilities and services found in Stage 1.
+        Creates payloads appropriate for the ACTUAL target platform
+        using the ACTUAL vulnerabilities found in Stage 1.
+        NOT hardcoded for any specific scenario.
         """
         pb = PromptBuilder
         
+        platform = host.platform or "UNKNOWN"
         sections = []
         
         # Target platform
-        if host.platform:
-            sections.append(f"TARGET PLATFORM: {host.platform}")
+        sections.append(f"TARGET PLATFORM: {platform}")
         
         # What recon found
         if context.reconnaissance:
-            sections.append(f"RECONNAISSANCE FINDINGS:\n{context.reconnaissance}")
+            sections.append(f"RECONNAISSANCE FINDINGS:\n{context.reconnaissance[:500]}")
+        else:
+            sections.append(f"RECONNAISSANCE: No specific findings - create generic payload")
         
         # Services and vulnerabilities
         services_info = []
@@ -481,36 +548,81 @@ Output: One detailed string describing reconnaissance findings, discovered attac
         if services_info:
             sections.append("TARGET ATTACK SURFACE:\n" + "\n".join(services_info))
         
-        # Security controls
+        # Security controls to bypass
         if host.security_controls:
             sections.append(f"SECURITY CONTROLS TO BYPASS: {pb._format_list(host.security_controls)}")
         
         target_info = "\n\n".join(sections)
         
-        return f"""STAGE 2: WEAPONIZATION
+        # Platform-specific payload guidance
+        platform_guidance = {
+            "windows": "Create .exe, .ps1, or .bat payload. Use Windows-specific tools like msfvenom or PowerShell.",
+            "linux": "Create .sh or ELF binary payload. Use bash/python for shell scripts or gcc for compiled binaries.",
+            "macos": "Create .sh, .app, or Mach-O binary payload. Leverage macOS-specific execution contexts.",
+        }
+        
+        platform_lower = platform.lower()
+        guidance = "Create payload for UNKNOWN platform - analyze actual target characteristics."
+        for key, val in platform_guidance.items():
+            if key in platform_lower:
+                guidance = val
+                break
+        
+        return f"""STAGE 2: WEAPONIZATION - CREATE PAYLOAD FOR {platform.upper()}
 
 {target_info}
 
-YOUR TASK:
-1. Create weaponized payloads SPECIFICALLY for the vulnerabilities found in reconnaissance
-2. Match payload architecture to target platform (Windows/Linux/etc)
-3. Include specific artifact names (e.g., payload.exe, backdoor.sh, update.ps1)
-4. Consider security controls for evasion techniques
-5. Map to MITRE techniques (T1587.001, T1588.001, etc.)
+PAYLOAD CREATION GUIDANCE:
+{guidance}
 
-CRITICAL: Reference the SPECIFIC vulnerabilities from reconnaissance.
-If recon found CVE-2017-0144 (EternalBlue), create Windows/Meterpreter payload.
-Name your artifacts specifically - they will be referenced in Installation stage.
+YOUR TASK - CREATE PLATFORM-APPROPRIATE PAYLOAD:
+1. Analyze reconnaissance findings - what vulnerabilities were identified?
+2. Create payload APPROPRIATE for {platform} platform
+3. Match payload type to platform requirements:
+   - Windows: .exe (PE), .ps1 (PowerShell), or .bat (batch)
+   - Linux: .sh (shell script) or ELF binary
+   - macOS: .sh (shell) or .app (bundle)
+4. Include specific artifact names (e.g., payload.exe, backdoor.sh, update.ps1)
+5. Consider security controls for evasion techniques
+6. Reference specific vulnerabilities from Stage 1
+7. Map to MITRE techniques (T1587.001, T1588.001, T1566, etc.)
 
-Output: One detailed string describing payload creation with SPECIFIC file names and commands."""
+CRITICAL FORMAT REQUIREMENT - Your response MUST include:
+
+## Weaponization Summary
+[Description of payload creation for {platform}]
+
+### Tools and Methods
+- [Tool name]: [Description]
+
+### Artifact Details
+- **Artifact Name**: [EXACT filename: payload.exe OR exploit.sh OR other specific name]
+- **Target Platform**: {platform}
+- **Payload Type**: [Description, e.g., "Windows x64 Meterpreter"]
+
+### Creation Command
+```
+[Specific command: msfvenom, wget, curl, python, etc. with all parameters]
+```
+
+### MITRE Techniques
+- [Technique]: [Description]
+
+STRICT RULES FOR EXTRACTION:
+1. ALWAYS include "### Artifact Details" section
+2. ALWAYS include "- **Artifact Name**:" with specific filename
+3. ALWAYS include code block with creation command
+4. DO NOT use vague names - be specific to platform and vulnerability
+5. Reference ACTUAL vulnerabilities from Stage 1"""
     
     @staticmethod
     def build_delivery_prompt(host: InputHost, context: AttackContext) -> str:
         """
-        Stage 3: Delivery WITH PAYLOAD AND RECON CONTEXT.
+        Stage 3: Delivery - USE ACTUAL ARTIFACT AND AVAILABLE SERVICES.
         
-        Designs delivery method that uses the payload created in Weaponization
-        and leverages services/vulnerabilities found in Reconnaissance.
+        Delivers the ACTUAL payload created in Stage 2
+        using ACTUAL available services from Stage 1.
+        Not hardcoded to any specific delivery method.
         """
         pb = PromptBuilder
         
@@ -518,13 +630,13 @@ Output: One detailed string describing payload creation with SPECIFIC file names
         
         # Recon findings
         if context.reconnaissance:
-            sections.append(f"RECONNAISSANCE FINDINGS:\n{context.reconnaissance}")
+            sections.append(f"STAGE 1 RECONNAISSANCE:\n{context.reconnaissance[:400]}")
         
-        # Weaponization output
+        # Weaponization - what payload was created?
         if context.weaponization:
-            sections.append(f"PAYLOAD CREATED IN WEAPONIZATION:\n{context.weaponization}")
+            sections.append(f"STAGE 2 PAYLOAD:\n{context.weaponization[:400]}")
         
-        # Network exposure
+        # Available services and ports
         network_info = []
         if host.internet_exposed is not None:
             exposure = "Internet-exposed" if host.internet_exposed else "Internal network"
@@ -534,151 +646,198 @@ Output: One detailed string describing payload creation with SPECIFIC file names
         if host.services:
             network_info.append(f"- Services: {pb._format_list(host.services)}")
         if network_info:
-            sections.append("DELIVERY VECTOR:\n" + "\n".join(network_info))
+            sections.append("AVAILABLE DELIVERY VECTORS:\n" + "\n".join(network_info))
         
         target_info = "\n\n".join(sections)
         
-        return f"""STAGE 3: DELIVERY
+        return f"""STAGE 3: DELIVERY - USE ACTUAL PAYLOAD AND SERVICES
 
 {target_info}
 
-YOUR TASK:
-1. Design delivery method that USES the payload created in Weaponization
-2. Leverage vulnerabilities/services from Reconnaissance (match attack vectors)
-3. Consider network exposure and firewall rules
-4. Provide step-by-step Metasploit or alternative delivery procedure
-5. Map to MITRE techniques (T1566, T1190, T1566.002, etc.)
+YOUR TASK - DELIVER PAYLOAD VIA AVAILABLE SERVICES:
+1. The payload from Stage 2 must be delivered to the target
+2. Use ONLY the ports and services actually available (from Stage 1)
+3. Match delivery method to:
+   - Available services (SSH, HTTP, SMB, etc.)
+   - Identified vulnerabilities from Stage 1
+   - Payload type from Stage 2 (exe, sh, ps1, etc.)
+4. If multiple services available: SSH (port 22), HTTP (port 80), SMB (port 445), RDP (port 3389), etc.
+5. Provide step-by-step delivery procedure
+6. Include specific commands or Metasploit steps
+7. Map to MITRE techniques (T1566, T1190, T1566.002, etc.)
 
-CRITICAL: Your delivery method MUST align with:
-- The payload created in Weaponization (format, architecture)
-- The vulnerabilities found in Reconnaissance (exploit target services)
-- Do NOT invent new attack vectors not mentioned in prior stages
+DELIVERY METHODS BASED ON AVAILABLE SERVICES:
+- SSH available: Use SSH injection, key-based auth, or direct shell execution
+- HTTP/HTTPS available: Use wget, curl, Invoke-WebRequest, or direct download
+- SMB available: Use file share injection, PsExec, or direct SMB exploitation
+- RDP available: Use RDP injection or session hijacking
+- Custom services: Exploit service-specific vulnerabilities
 
-Output: One detailed string with specific delivery procedure (Metasploit commands or alternative method)."""
+CRITICAL REQUIREMENT:
+- Reference the EXACT payload name from Stage 2
+- Use ONLY ports/services from Stage 1 reconnaissance
+- Do NOT invent new attack methods not found in recon
+
+Your response must include step-by-step delivery procedure (commands or detailed steps)."""
     
     @staticmethod
     def build_exploitation_prompt(host: InputHost, context: AttackContext) -> str:
         """
-        Stage 4: Exploitation WITH DELIVERY AND RECON CONTEXT.
+        Stage 4: Exploitation - USE ACTUAL VULNERABILITIES FROM STAGE 1.
         
-        Executes the delivery to trigger exploitation.
-        References specific CVEs from prior stages.
+        Executes exploitation using specific CVEs/weaknesses identified
+        in reconnaissance. Not hardcoded to specific CVEs.
         """
         pb = PromptBuilder
         
         sections = []
         
-        # Prior stages
+        # Summary of attack chain so far
         if context.reconnaissance:
-            sections.append(f"RECONNAISSANCE: {context.reconnaissance[:200]}...")
+            sections.append(f"STAGE 1 RECON: {context.reconnaissance[:250]}")
         if context.weaponization:
-            sections.append(f"PAYLOAD: {context.weaponization[:200]}...")
+            sections.append(f"STAGE 2 PAYLOAD: {context.weaponization[:250]}")
         if context.delivery:
-            sections.append(f"DELIVERY METHOD: {context.delivery[:200]}...")
+            sections.append(f"STAGE 3 DELIVERY: {context.delivery[:250]}")
         
-        # Vulnerabilities
+        # Specific vulnerabilities to exploit
         if host.vulnerabilities:
-            sections.append(f"TARGET VULNERABILITIES: {pb._format_list(host.vulnerabilities)}")
+            sections.append(f"VULNERABILITIES TO EXPLOIT:\n  • {chr(10).join(host.vulnerabilities)}")
         
         target_info = "\n\n".join(sections)
         
-        return f"""STAGE 4: EXPLOITATION
+        return f"""STAGE 4: EXPLOITATION - TRIGGER ACTUAL VULNERABILITIES
 
 {target_info}
 
-YOUR TASK:
+YOUR TASK - EXPLOIT SPECIFIC VULNERABILITIES:
 1. Execute the delivery method from Stage 3
-2. Exploit SPECIFIC CVEs/vulnerabilities mentioned in prior stages
-3. Confirm successful exploitation and access level achieved
-4. Include detailed exploitation steps and commands
-5. Map to MITRE techniques (T1190, T1203, etc.)
+2. Exploit SPECIFIC CVEs/vulnerabilities identified in Stage 1 recon
+3. Confirm successful exploitation and verify access level achieved
+4. Include detailed step-by-step exploitation procedure
+5. Show commands or techniques specific to identified vulnerabilities
+6. Map to MITRE Initial Access techniques (T1190, T1203, T1566, etc.)
 
-CRITICAL: This exploitation MUST align with:
-- The delivery method described in Stage 3
-- The vulnerabilities found in Reconnaissance
-- Do NOT invent new CVEs or attack vectors
+CRITICAL - DO NOT ASSUME:
+- Do NOT assume EternalBlue unless it was in Stage 1 recon
+- Do NOT assume specific CVEs not in Stage 1 findings
+- Use ACTUAL vulnerabilities and services from recon
+- If no specific CVE found, exploit generic weaknesses (weak auth, misconfiguration, etc.)
 
-Output: One detailed string describing exploitation execution and initial access achieved."""
+Your response must include:
+- Specific exploitation procedure (step-by-step)
+- CVE or vulnerability exploited
+- Confirmation of successful initial access"""
     
     @staticmethod
     def build_installation_prompt(host: InputHost, context: AttackContext) -> str:
         """
-        Stage 5: Installation WITH PAYLOAD NAME REFERENCE (CRITICAL).
+        Stage 5: Installation - USE ACTUAL ARTIFACT NAME AND OS-SPECIFIC PERSISTENCE.
         
-        Establishes persistence using specific artifacts created in Weaponization.
-        MUST reference payload names from earlier stages.
+        Establishes persistence using the EXACT payload from Stage 2.
+        Uses OS-appropriate persistence mechanism (Windows/Linux/macOS).
+        CRITICAL for artifact continuity.
         """
         pb = PromptBuilder
         
+        platform = host.platform or "UNKNOWN"
         sections = []
         
         # Weaponization payloads (CRITICAL for artifact names)
         if context.weaponization:
-            sections.append(f"PAYLOADS FROM WEAPONIZATION:\n{context.weaponization}")
+            sections.append(f"PAYLOADS FROM STAGE 2:\n{context.weaponization[:400]}")
         
         # Delivery and exploitation confirmation
         if context.delivery:
-            sections.append(f"DELIVERY METHOD: {context.delivery[:300]}...")
+            sections.append(f"DELIVERY METHOD: {context.delivery[:250]}")
         if context.exploitation:
-            sections.append(f"EXPLOITATION RESULT: {context.exploitation[:300]}...")
+            sections.append(f"EXPLOITATION RESULT: {context.exploitation[:250]}")
         
-        # Target OS and access
+        # Target OS for persistence selection
         platform_info = []
-        if host.platform:
-            platform_info.append(f"- Platform: {host.platform}")
+        platform_info.append(f"- Platform: {platform}")
         if host.admin_accounts:
             platform_info.append(f"- Admin Accounts: {pb._format_list(host.admin_accounts)}")
-        if platform_info:
-            sections.append("TARGET CONTEXT:\n" + "\n".join(platform_info))
+        sections.append("TARGET CONTEXT FOR PERSISTENCE:\n" + "\n".join(platform_info))
         
         target_info = "\n\n".join(sections)
         
-        return f"""STAGE 5: INSTALLATION & PERSISTENCE
+        # Platform-specific persistence guidance
+        persistence_guidance = {
+            "windows": "Use Windows persistence methods: Scheduled Tasks (schtasks.exe), Registry Run Keys, Services (sc.exe), or Startup folders. Use cmd.exe syntax for schtasks commands.",
+            "linux": "Use Linux persistence methods: Cron jobs, systemd services, shell profile modifications (.bashrc, .bash_profile), or init scripts.",
+            "macos": "Use macOS persistence methods: LaunchAgent/LaunchDaemon plists, shell profile modifications, or cron jobs.",
+        }
+        
+        platform_lower = platform.lower()
+        guidance = "Use OS-appropriate persistence mechanism. Analyze platform from Stage 1 recon."
+        for key, val in persistence_guidance.items():
+            if key in platform_lower:
+                guidance = val
+                break
+        
+        return f"""STAGE 5: INSTALLATION & PERSISTENCE - {platform.upper()} SPECIFIC
 
 {target_info}
 
-YOUR TASK:
-1. Establish persistence using the SPECIFIC ARTIFACT NAMES from Weaponization
-2. Upload/transfer payloads using methods confirmed in Delivery
-3. Configure persistence mechanism (scheduled tasks, registry, cron, systemd, etc.)
-4. Map to MITRE techniques (T1105, T1053, T1543, T1547, etc.)
+PERSISTENCE METHOD FOR {platform}:
+{guidance}
 
-⚠️ CRITICAL CONTINUITY RULES:
-- REFERENCE artifact names FROM Weaponization BY NAME
-  ✓ "Upload payload.exe (from Weaponization) to C:\\Temp\\payload.exe"
-  ✗ "Upload backdoor.exe" (if Weaponization created payload.exe)
-- Use persistence method appropriate for target platform
-- Ensure file transfer path is logically consistent with prior stages
-- Do NOT invent new artifacts
+YOUR TASK - ESTABLISH PERSISTENCE:
+1. Upload/transfer the EXACT artifact names from Stage 2 to target
+2. Use the delivery method confirmed in Stage 3
+3. Create persistence mechanism APPROPRIATE for {platform}
+4. Ensure persistence survives reboot and system restarts
+5. Reference artifact names FROM Stage 2 BY NAME (critical for continuity!)
+6. Map to MITRE techniques (T1105, T1053, T1543, T1547, T1037, etc.)
 
-Output: One detailed string with SPECIFIC file names and persistence mechanism."""
+CRITICAL CONTINUITY RULES:
+✓ "Upload {{"filename"}} (created in Stage 2) to target location"
+✓ Reference exact payload names from Weaponization
+✓ Use platform-specific paths:
+  - Windows: C:\\Temp\\, C:\\Windows\\Temp\\, C:\\ProgramData\\, %APPDATA%\\
+  - Linux: /tmp/, /var/tmp/, /home/user/.config/, /var/lib/
+  - macOS: /tmp/, /var/tmp/, /Library/, ~/Library/
+
+PERSISTENCE METHODS BY PLATFORM:
+- Windows: schtasks (scheduled tasks), Registry HKCU\\Run, Registry HKLM\\Run, Services
+- Linux: cron (@reboot, hourly, daily), systemd services, .bashrc, /etc/rc.local
+- macOS: LaunchAgent (~\/Library\/LaunchAgents), LaunchDaemon (\/Library\/LaunchDaemons), cron
+
+Your response MUST include:
+- Specific upload/transfer commands (with artifact name)
+- Persistence mechanism setup (with exact commands)
+- File locations and permissions
+- Verification steps"""
     
     @staticmethod
     def build_command_and_control_prompt(host: InputHost, context: AttackContext) -> str:
         """
-        Stage 6: Command and Control WITH FULL PRIOR CONTEXT.
+        Stage 6: Command & Control - ADAPTIVE TO PLATFORM AND PERSISTENCE.
         
-        Establishes C2 channel that works with persistence from Installation.
+        Establishes C2 channel appropriate for the payload and target platform.
+        Uses actual network exposure and security controls from Stage 1.
         """
         pb = PromptBuilder
         
+        platform = host.platform or "UNKNOWN"
         sections = []
         
         # Attack progression
         attack_summary = []
         if context.reconnaissance:
-            attack_summary.append(f"Recon: {context.reconnaissance[:150]}...")
+            attack_summary.append(f"Recon: {context.reconnaissance[:120]}")
         if context.weaponization:
-            attack_summary.append(f"Payload: {context.weaponization[:150]}...")
+            attack_summary.append(f"Payload: {context.weaponization[:120]}")
         if context.installation:
-            attack_summary.append(f"Persistence: {context.installation[:150]}...")
+            attack_summary.append(f"Persistence: {context.installation[:120]}")
         if attack_summary:
             sections.append("ATTACK PROGRESSION:\n" + "\n".join(attack_summary))
         
         # Network context
         network_info = []
         if host.internet_exposed is not None:
-            exposure = "Internet-exposed" if host.internet_exposed else "Internal"
+            exposure = "Internet-exposed (outbound possible)" if host.internet_exposed else "Internal network (restricted outbound)"
             network_info.append(f"- Network: {exposure}")
         if host.firewall_rules:
             network_info.append(f"- Firewall Rules: {pb._format_list(host.firewall_rules)}")
@@ -687,20 +846,52 @@ Output: One detailed string with SPECIFIC file names and persistence mechanism."
         if network_info:
             sections.append("NETWORK CONTEXT:\n" + "\n".join(network_info))
         
-        target_info = "\n\n".join(sections)
+        chain_info = "\n\n".join(sections)
         
-        return f"""STAGE 6: COMMAND & CONTROL
+        # Platform-specific C2 guidance
+        c2_guidance = {
+            "windows": "Use HTTP/HTTPS-based C2 (Meterpreter, Empire), DNS tunneling, or SMTP for egress. Consider PowerShell callbacks.",
+            "linux": "Use HTTP/HTTPS-based C2, DNS tunneling, or reverse shell protocols (netcat, bash). Shell-based callbacks ideal.",
+            "macos": "Use HTTP/HTTPS-based C2, reverse shells via bash/sh, or custom Python/Ruby callbacks.",
+        }
+        
+        platform_lower = platform.lower()
+        c2_guide = "Use C2 appropriate for platform and network constraints."
+        for key, val in c2_guidance.items():
+            if key in platform_lower:
+                c2_guide = val
+                break
+        
+        return f"""STAGE 6: COMMAND & CONTROL - {platform.upper()} ADAPTED
 
-{target_info}
+{chain_info}
 
-YOUR TASK:
-1. Establish C2 channel FROM the persistent payload established in Installation
+C2 METHODS FOR {platform}:
+{c2_guide}
+
+YOUR TASK - ESTABLISH C2 CHANNEL:
+1. C2 setup FROM the persistent payload established in Stage 5
 2. Consider network exposure (internet vs internal)
 3. Account for firewall rules and security monitoring
-4. Include detailed C2 setup (protocols, tools, listeners)
-5. Map to MITRE techniques (T1071, T1573, T1008, etc.)
+4. Choose protocol appropriate for:
+   - Payload type from Stage 2
+   - Network exposure from Stage 1
+   - Persistence method from Stage 5
+5. Include detailed C2 setup (protocols, tools, listeners)
+6. Map to MITRE C2 techniques (T1071, T1573, T1008, T1572, T1090, etc.)
 
-Output: One detailed string describing C2 channel setup."""
+C2 PROTOCOL OPTIONS:
+- HTTP/HTTPS: Most common, harder to detect if encrypted
+- DNS: Stealthy, works through firewalls
+- SMTP/POP3: Mail-based, unusual but possible
+- Custom protocols: More evasive but complex
+- Reverse shell: Direct callback for interactive shell access
+
+Your response must include:
+- Selected C2 protocol and justification
+- Setup steps (listener on attacker side, callback from payload)
+- Commands to test C2 connectivity
+- Evasion techniques for detection avoidance"""
     
     @staticmethod
     def build_actions_on_objectives_prompt(host: InputHost, context: AttackContext) -> str:
@@ -747,15 +938,71 @@ Output: One detailed string describing C2 channel setup."""
         
         chain_info = "\n\n".join(sections)
         
-        return f"""STAGE 7: ACTIONS ON OBJECTIVES
+        # Platform-specific objectives
+        objectives_map = {
+            "windows": [
+                "Credential harvesting (SAM hive, LSASS)",
+                "Domain privilege escalation (LDAP enumeration)",
+                "Data exfiltration (file shares, databases)",
+                "Lateral movement (Windows credentials, Kerberos)",
+                "System reconnaissance (net, ipconfig, tasklist)"
+            ],
+            "linux": [
+                "Credential harvesting (/etc/shadow, .ssh keys)",
+                "System reconnaissance (uname, netstat, ps)",
+                "Data exfiltration (file access, mounted shares)",
+                "Lateral movement (SSH keys, sudo abuse)",
+                "Persistence enhancement (rootkit, kernel module)"
+            ],
+            "macos": [
+                "Credential harvesting (Keychain, system.keychain)",
+                "Data exfiltration (user files, Documents, iCloud)",
+                "Lateral movement (SSH keys, local admin)",
+                "System reconnaissance (system_profiler)",
+                "Persistence (LaunchDaemon, kernel extension)"
+            ],
+        }
+        
+        platform_lower = (host.platform or "unknown").lower()
+        default_objectives = [
+            "Credential harvesting from local storage",
+            "Data discovery and exfiltration",
+            "Lateral movement within network",
+            "System reconnaissance and mapping",
+            "Persistence enhancement"
+        ]
+        
+        objectives = default_objectives
+        for key, val in objectives_map.items():
+            if key in platform_lower:
+                objectives = val
+                break
+        
+        objectives_list = "\n".join([f"   - {obj}" for obj in objectives])
+        
+        return f"""STAGE 7: ACTIONS ON OBJECTIVES - {(host.platform or "UNKNOWN").upper()} POST-EXPLOITATION
 
 {chain_info}
 
-YOUR TASK:
-1. Leverage the access established through the full attack chain above
-2. Pursue objectives based on asset value (criticality, data classification, business role)
-3. Target high-value systems (databases, admin accounts, dev tools)
-4. Consider privilege level achieved through exploitation
-5. Map to MITRE techniques (T1003, T1021, T1567, T1041, etc.)
+OBJECTIVES FOR {(host.platform or "UNKNOWN").upper()}:
+{objectives_list}
 
-Output: One detailed string describing post-exploitation objectives."""
+YOUR TASK - DEFINE POST-EXPLOITATION ACTIONS:
+1. Based on full attack chain from Stages 1-6 above
+2. Based on platform and available access
+3. Based on data sensitivity and business value
+4. Include specific commands/techniques for each objective
+5. Map to MITRE objectives (T1020, T1557, T1005, T1041, T1537, T1005, T1021, etc.)
+6. Estimate time and detection risk for each action
+
+REQUIRED OUTPUT FORMAT:
+Include an "### Artifact Details" section with:
+- **Artifact Name**: Specific objective artifact (e.g., "credentials_harvested", "admin_account", "database_backup")
+- **Artifact Type**: Type of objective achieved
+- **Actions**: Specific commands to achieve objective
+
+Actions to consider:
+- Credentials: Dump hashes, extract API keys, steal SSH keys
+- Data: Find sensitive files, copy databases, export configurations
+- Lateral: Enumerate network, compromise additional systems
+- Coverage: Clear logs, disable security tools, modify timestamps"""

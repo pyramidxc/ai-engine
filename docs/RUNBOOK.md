@@ -2,6 +2,64 @@
 
 Day-to-day operational procedures for AI Engine.
 
+## Local Development (with venv)
+
+### Activate Virtual Environment
+
+```bash
+# Navigate to project directory
+cd /path/to/ai-engine
+
+# Activate venv (Linux/macOS)
+source venv/bin/activate
+
+# Activate venv (Windows)
+venv\Scripts\activate
+
+# You should see (venv) prefix in your terminal
+```
+
+### Start Development Server
+
+```bash
+# Activate venv first (see above)
+source venv/bin/activate
+
+# Start server with auto-reload
+uvicorn app.main:app --reload --port 8000
+
+# Alternative: Run as module
+python -m app.main
+
+# Server will be available at http://localhost:8000
+```
+
+### Stop Development Server
+
+```bash
+# Press Ctrl+C in the terminal running the server
+# Or in another terminal:
+pkill -f "uvicorn app.main" 
+pkill -f "python -m app.main"
+```
+
+### Verify Installation
+
+```bash
+# Activate venv
+source venv/bin/activate
+
+# Test imports
+python -c "from app.main import app; print('✓ App imports successfully')"
+
+# Test server startup
+python -m app.main &
+sleep 2
+curl http://localhost:8000/health
+echo "Server is running!"
+pkill -f "python -m app.main"
+```
+
 ## Service Management
 
 ### Check Service Status
@@ -56,14 +114,14 @@ grep -c "error\|failed" logs/token_usage.jsonl
 ### Test Endpoint
 
 ```bash
-# Health check
-curl http://localhost:8000/ready
+# Make sure venv is activated
+source venv/bin/activate
 
-# Status
-curl http://localhost:8000/status
+# Health check
+curl http://localhost:8000/health
 
 # Full analysis (uses example request)
-curl -X POST "http://localhost:8000/analyze" \
+curl -X POST "http://localhost:8000/attack-path/main" \
   -H "Content-Type: application/json" \
   -d @examples/requests/linux_web_server_enhanced.json
 ```
@@ -79,15 +137,49 @@ jq -s 'add | {requests: length, total_tokens: .total_tokens | add, avg_tokens: (
   logs/token_usage.jsonl
 ```
 
-### Check API Quota
+### Check Health
 
-Monitor OpenAI API usage:
-- Portal: https://platform.openai.com/account/usage
-- Typically check daily for usage spikes
+```bash
+# Health check
+curl http://localhost:8000/health
+```
 
 ## Troubleshooting
 
-### Service Won't Start
+### Service Won't Start (Local with venv)
+
+1. **Check venv is activated**: Look for `(venv)` prefix in terminal
+   ```bash
+   source venv/bin/activate
+   ```
+
+2. **Verify dependencies installed**:
+   ```bash
+   source venv/bin/activate
+   pip list | grep -E "fastapi|pydantic|uvicorn"
+   ```
+
+3. **Check API key**:
+   ```bash
+   source venv/bin/activate
+   echo $OPENAI_API_KEY
+   # Should print your key, not empty
+   ```
+
+4. **Test imports**:
+   ```bash
+   source venv/bin/activate
+   python -c "from app.main import app; print('OK')"
+   ```
+
+5. **Check port availability**:
+   ```bash
+   lsof -i :8000
+   # If port in use, kill the process or use different port
+   uvicorn app.main:app --port 8001
+   ```
+
+### Service Won't Start (Docker)
 
 1. Check logs: `docker logs ai-engine`
 2. Verify API key: `echo $OPENAI_API_KEY`
@@ -177,7 +269,12 @@ crontab -l
 4. Verify service recovers
 5. Monitor for 30 minutes
 
-### Data Loss Recovery
+### Health Checks
+
+```bash
+# Health check
+curl http://localhost:8000/health
+```
 
 1. Stop service immediately
 2. Restore from backup
@@ -222,7 +319,7 @@ nano .env
 docker restart ai-engine
 
 # Verify new key works
-curl http://localhost:8000/ready
+curl http://localhost:8000/health
 ```
 
 ### Security Updates

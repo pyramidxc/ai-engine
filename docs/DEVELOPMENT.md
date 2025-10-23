@@ -78,7 +78,7 @@ DEBUG=true
 LOG_LEVEL=DEBUG
 ```
 
-### 5. Verify Installation
+### Verify Installation
 
 ```bash
 # Run import test
@@ -89,8 +89,8 @@ python -m app.main &
 sleep 2
 
 # Test endpoint
-curl http://localhost:8000/ready
-# Should return: {"ready":true}
+curl http://localhost:8000/health
+# Should return: {"status":"ok","version":"1.0.0","model":"gpt-4o-mini"}
 
 # Stop server (if running)
 pkill -f "python -m app.main"
@@ -105,7 +105,7 @@ pkill -f "python -m app.main"
 python -m app.main
 
 # With auto-reload
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8000 | python3 -m json.tool
 
 # With custom port
 python -m app.main --port 8001
@@ -255,18 +255,52 @@ Test with sample requests:
 
 ```bash
 # Test with example file
-curl -X POST "http://localhost:8000/analyze" \
+curl -X POST "http://localhost:8000/attack-path/main" \
   -H "Content-Type: application/json" \
   -d @examples/requests/linux_web_server_enhanced.json
 
-# Test with inline request
-curl -X POST "http://localhost:8000/analyze" \
+# Test with inline request (RECOMMENDED - includes services field)
+curl -X POST "http://localhost:8000/attack-path/main" \
   -H "Content-Type: application/json" \
   -d '{
-    "target_description": "Test target",
-    "context": "Test context"
-  }'
+    "platform": "Windows",
+    "version_os": "Windows 7",
+    "open_ports": [139, 445],
+    "services": ["SMB"],
+    "vulnerabilities": ["MS17-010"]
+  }' | python3 -m json.tool
+
+# Minimal request (works but produces less detailed analysis)
+curl -X POST "http://localhost:8000/attack-path/main" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platform": "Windows",
+    "version_os": "Server 2019",
+    "open_ports": [139, 445],
+    "vulnerabilities": ["MS17-010"]
+  }' | python3 -m json.tool
 ```
+
+**⚠️ Important Note on Input Quality:**
+
+Including more context fields **dramatically improves response quality**:
+
+| Aspect | Without `services` | With `services` |
+|--------|-------------------|-----------------|
+| Validation Checks | 3 checks pass | 6 checks pass |
+| Artifact Consistency | Stages 2-3 missing artifact | All stages track artifact |
+| Stage Details | Basic content | Rich, detailed content |
+| Continuity Validation | Weaker | Full continuity validation |
+
+**Best Practice**: Always include as many context fields as available:
+
+- `services`: What services are running
+- `vulnerability_score`: CVSS score for severity
+- `security_controls`: Existing defenses
+- `edr_agent`: Endpoint detection and response
+- `antivirus_status`: AV deployment status
+
+More input context = Better attack path analysis
 
 ### 6. Debug Code
 
@@ -396,6 +430,7 @@ pytest --cov=app --cov-report=html
 **Problem**: `ModuleNotFoundError: No module named 'app'`
 
 **Solution**:
+
 ```bash
 # Ensure you're in project root
 pwd  # Should show /path/to/ai-engine
@@ -412,6 +447,7 @@ pip install -r requirements.txt
 **Problem**: `RuntimeError: OPENAI_API_KEY environment variable not set`
 
 **Solution**:
+
 ```bash
 # Check .env exists
 ls -la .env
@@ -428,6 +464,7 @@ export OPENAI_API_KEY=sk-your-key-here
 **Problem**: `Address already in use: ('127.0.0.1', 8000)`
 
 **Solution**:
+
 ```bash
 # Find process using port
 lsof -i :8000
@@ -444,6 +481,7 @@ python -m app.main --port 8001
 **Problem**: Test failures with async code
 
 **Solution**:
+
 ```python
 # Ensure pytest-asyncio installed
 pip install pytest-asyncio
@@ -527,7 +565,7 @@ open docs/_build/html/index.html
 - Link to related documentation
 
 ```python
-def analyze(self, request: AnalysisRequest) -> CompleteAnalysisResponse:
+async def analyze(self, host: InputHost) -> CompleteAnalysisResponse:
     """
     Analyze attack path for target system.
     
@@ -535,7 +573,7 @@ def analyze(self, request: AnalysisRequest) -> CompleteAnalysisResponse:
     continuity validation. Results are returned with validation report.
     
     Args:
-        request: Analysis request with target and context
+        host: InputHost model with 50+ optional parameters
         
     Returns:
         Comprehensive analysis with all 7 stages and validation results
@@ -545,9 +583,11 @@ def analyze(self, request: AnalysisRequest) -> CompleteAnalysisResponse:
         TimeoutError: If analysis exceeds timeout
         
     Example:
-        >>> request = AnalysisRequest(
-        ...     target_description="Apache 2.4.41 on Ubuntu",
-        ...     context="Authorized test"
+        >>> from app.models.host import InputHost
+        >>> request = InputHost(
+        ...     platform="Linux",
+        ...     version_os="Ubuntu 20.04",
+        ...     open_ports=[80, 443]
         ... )
         >>> response = analyzer.analyze(request)
         >>> print(response.validation_report.is_valid)

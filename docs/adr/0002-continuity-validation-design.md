@@ -153,7 +153,7 @@ Each check is independent and returns pass/warning/fail:
 Validation integrates into `CompleteAnalyzer.analyze()`:
 
 ```python
-async def analyze(self, request: AnalysisRequest) -> CompleteAnalysisResponse:
+async def analyze(self, host: InputHost) -> CompleteAnalysisResponse:
     # Generate stages (existing logic)
     stages = await self._generate_attack_path_with_continuity()
     

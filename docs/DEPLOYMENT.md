@@ -60,13 +60,13 @@ spec:
               key: openai-key
         livenessProbe:
           httpGet:
-            path: /ready
+            path: /health
             port: 8000
-          initialDelaySeconds: 30
+          initialDelaySeconds: 10
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /ready
+            path: /health
             port: 8000
           initialDelaySeconds: 5
           periodSeconds: 5
@@ -185,7 +185,7 @@ Configure in reverse proxy:
 ```nginx
 limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
 
-location /analyze {
+location /attack-path/main {
     limit_req zone=api_limit burst=20;
     proxy_pass http://localhost:8000;
 }
@@ -209,11 +209,8 @@ cat logs/token_usage.jsonl | jq '.total_tokens' | awk '{sum+=$1} END {print sum}
 ### Health Checks
 
 ```bash
-# Liveness check
-curl http://localhost:8000/ready
-
-# Status check
-curl http://localhost:8000/status
+# Health check
+curl http://localhost:8000/health
 ```
 
 ### Metrics to Monitor
