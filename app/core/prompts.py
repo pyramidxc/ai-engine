@@ -11,15 +11,15 @@ class PromptBuilder:
     """Builds prompts for attack path generation."""
     
     SYSTEM_MESSAGE = (
-        "You are an expert penetration tester analyzing security reconnaissance data "
+        "You are an expert Active Directory penetration tester analyzing security reconnaissance data "
         "to generate realistic attack paths. You understand offensive security fundamentals, "
-        "operating system internals, network protocols, and how different platforms/services work.\n\n"
+        "Active Directory architecture, Kerberos authentication, and how Windows domain environments work.\n\n"
         
         "CORE PRINCIPLES:\n"
-        "1. Understand the target platform and what's actually possible on it\n"
-        "2. Base all decisions on the provided reconnaissance data\n"
+        "1. Understand the target AD environment and what's actually possible\n"
+        "2. Base all decisions on the provided Active Directory reconnaissance data\n"
         "3. Provide probabilistic assessments: main path + alternatives with likelihood\n"
-        "4. Use appropriate techniques for the specific environment\n"
+        "4. Use appropriate AD techniques (Kerberoasting, delegation abuse, GPO attacks, etc.)\n"
         "5. Build on previous state - each step should logically follow\n\n"
         
         "OUTPUT FORMAT:\n"
@@ -30,7 +30,7 @@ class PromptBuilder:
         "- Technical details (commands, tools)\n"
         "- Expected outcome\n\n"
         
-        "Think like a real penetration tester who understands how systems actually work."
+        "Think like a real penetration tester who understands how Active Directory actually works."
     )
     
     @staticmethod
@@ -56,63 +56,110 @@ class PromptBuilder:
         sections = []
         
         # Core system info
-        if host.platform or host.version_os:
+        if host.OperatingSystem or host.OperatingSystemVersion:
             core = []
-            if host.platform:
-                core.append(f"Platform: {host.platform}")
-            if host.version_os:
-                core.append(f"OS Version: {host.version_os}")
-            if host.os_end_of_life:
-                core.append("⚠️ OS IS END-OF-LIFE (unsupported, likely unpatched)")
+            if host.OperatingSystem:
+                core.append(f"Operating System: {host.OperatingSystem}")
+            if host.OperatingSystemVersion:
+                core.append(f"OS Version: {host.OperatingSystemVersion}")
+            if host.OperatingSystemServicePack:
+                core.append(f"Service Pack: {host.OperatingSystemServicePack}")
+            if host.OperatingSystemHotfix:
+                core.append(f"Installed Hotfixes: {pb._format_list(host.OperatingSystemHotfix)}")
             sections.append("=== SYSTEM ===\n" + "\n".join(core))
         
-        # Network exposure
-        if host.internet_exposed is not None or host.open_ports:
+        # Network & identity
+        if host.DNSHostName or host.IPv4Address or host.DomainName:
             network = []
-            if host.internet_exposed:
-                network.append("⚠️ INTERNET-EXPOSED")
-            if host.open_ports:
-                network.append(f"Open Ports: {', '.join(map(str, host.open_ports))}")
-            if host.services:
-                network.append(f"Services: {pb._format_list(host.services)}")
-            sections.append("=== NETWORK ===\n" + "\n".join(network))
+            if host.DNSHostName:
+                network.append(f"DNS Hostname: {host.DNSHostName}")
+            if host.IPv4Address:
+                network.append(f"IP Address: {host.IPv4Address}")
+            if host.DomainName:
+                network.append(f"⚠️ Domain: {host.DomainName}")
+            sections.append("=== NETWORK & IDENTITY ===\n" + "\n".join(network))
         
-        # Vulnerabilities
-        if host.vulnerabilities:
-            sections.append(f"=== VULNERABILITIES ===\n{pb._format_list(host.vulnerabilities)}")
+        # Asset identification
+        if host.SamAccountName or host.DistinguishedName:
+            asset = []
+            if host.SamAccountName:
+                asset.append(f"Account Name: {host.SamAccountName}")
+            if host.DistinguishedName:
+                asset.append(f"Distinguished Name: {host.DistinguishedName}")
+            if host.objectSid:
+                asset.append(f"SID: {host.objectSid}")
+            sections.append("=== ASSET IDENTIFICATION ===\n" + "\n".join(asset))
         
-        # Security controls
-        if host.security_controls or host.edr_agent or host.antivirus_status:
+        # Kerberos & delegation
+        if host.ServicePrincipalNames or host.TrustedForDelegation or host.TrustedToAuthForDelegation:
+            kerberos = []
+            if host.ServicePrincipalNames:
+                kerberos.append(f"⚠️ Service Principal Names: {pb._format_list(host.ServicePrincipalNames)}")
+            if host.TrustedForDelegation:
+                kerberos.append("⚠️ TRUSTED FOR DELEGATION (High Risk!)")
+            if host.TrustedToAuthForDelegation:
+                kerberos.append("⚠️ CONSTRAINED DELEGATION ENABLED")
+            if host.TGTDelegation:
+                kerberos.append("⚠️ TGT DELEGATION ALLOWED")
+            sections.append("=== KERBEROS & DELEGATION ===\n" + "\n".join(kerberos))
+        
+        # Security controls & privileges
+        if host.adminCount or host.PasswordNeverExpires or host.Enabled is not None:
             security = []
-            if host.security_controls:
-                security.append(f"Controls: {pb._format_list(host.security_controls)}")
-            if host.edr_agent:
-                security.append(f"EDR: {host.edr_agent}")
-            if host.antivirus_status:
-                security.append(f"Antivirus: {host.antivirus_status}")
+            if host.adminCount == 1:
+                security.append("⚠️ PRIVILEGED ACCOUNT (adminCount=1)")
+            if host.Enabled is not None:
+                security.append(f"Account Status: {'Enabled' if host.Enabled else 'Disabled'}")
+            if host.PasswordNeverExpires:
+                security.append("⚠️ PASSWORD NEVER EXPIRES")
+            if host.ProtectedFromAccidentalDeletion:
+                security.append("Protected from Deletion: Yes")
             sections.append("=== SECURITY CONTROLS ===\n" + "\n".join(security))
         
-        # Identity & access
-        if host.domain_membership or host.user_accounts or host.mfa_enabled is not None:
-            identity = []
-            if host.domain_membership:
-                identity.append(f"Domain: {host.domain_membership}")
-            if host.user_accounts:
-                identity.append(f"Users: {pb._format_list(host.user_accounts)}")
-            if host.admin_accounts:
-                identity.append(f"⚠️ Admin Accounts: {pb._format_list(host.admin_accounts)}")
-            if host.mfa_enabled is not None:
-                identity.append(f"MFA: {'Enabled' if host.mfa_enabled else '⚠️ DISABLED'}")
-            sections.append("=== IDENTITY & ACCESS ===\n" + "\n".join(identity))
+        # Group membership & access
+        if host.MemberOf or host.Members:
+            groups = []
+            if host.MemberOf:
+                groups.append(f"⚠️ Member Of: {pb._format_list(host.MemberOf)}")
+            if host.Members:
+                groups.append(f"Group Members: {pb._format_list(host.Members)}")
+            sections.append("=== GROUP MEMBERSHIP ===\n" + "\n".join(groups))
         
-        # Asset criticality
-        if host.asset_criticality or host.business_role:
-            criticality = []
-            if host.asset_criticality:
-                criticality.append(f"⚠️ Criticality: {host.asset_criticality}")
-            if host.business_role:
-                criticality.append(f"Role: {host.business_role}")
-            sections.append("=== ASSET IMPORTANCE ===\n" + "\n".join(criticality))
+        # GPO configuration
+        if host.LinkedGroupPolicyObjects or host.DisplayName or host.GpoStatus:
+            gpo = []
+            if host.DisplayName:
+                gpo.append(f"GPO Name: {host.DisplayName}")
+            if host.GpoStatus:
+                gpo.append(f"GPO Status: {host.GpoStatus}")
+            if host.LinkedGroupPolicyObjects:
+                gpo.append(f"Linked GPOs: {pb._format_list(host.LinkedGroupPolicyObjects)}")
+            if host.WmiFilter:
+                gpo.append(f"WMI Filter: {host.WmiFilter}")
+            sections.append("=== GROUP POLICY ===\n" + "\n".join(gpo))
+        
+        # Trust relationships
+        if host.Target or host.Source or host.TrustType:
+            trust = []
+            if host.Source:
+                trust.append(f"Source Domain: {host.Source}")
+            if host.Target:
+                trust.append(f"Target Domain: {host.Target}")
+            if host.Direction:
+                trust.append(f"Trust Direction: {host.Direction}")
+            if host.TrustType:
+                trust.append(f"Trust Type: {host.TrustType}")
+            if host.ForestTransitive:
+                trust.append("⚠️ FOREST TRANSITIVE TRUST")
+            if host.SelectiveAuthentication:
+                trust.append("Selective Authentication: Enabled")
+            if host.SIDFilteringForestAware:
+                trust.append("SID Filtering: Enabled")
+            sections.append("=== TRUST RELATIONSHIPS ===\n" + "\n".join(trust))
+        
+        # Risk indicators
+        if host.lastLogonTimestamp:
+            sections.append(f"=== LAST LOGON ===\nTimestamp: {host.lastLogonTimestamp}")
         
         return "\n\n".join(sections)
     

@@ -233,16 +233,16 @@ class Orchestrator:
         """
         errors = []
         
-        # Required fields
-        if not host.platform:
-            errors.append("Missing required field: platform")
+        # For AD-focused analysis, we just check if we have SOME identifying information
+        has_identity = (
+            host.DNSHostName or 
+            host.SamAccountName or 
+            host.DistinguishedName or 
+            host.DomainName
+        )
         
-        if not host.ip_addresses or len(host.ip_addresses) == 0:
-            errors.append("Missing required field: ip_addresses")
-        
-        # Type checks
-        if host.open_ports and not isinstance(host.open_ports, list):
-            errors.append("Invalid type for open_ports: must be list")
+        if not has_identity:
+            errors.append("Missing identity information: need at least one of DNSHostName, SamAccountName, DistinguishedName, or DomainName")
         
         return {
             "valid": len(errors) == 0,
@@ -252,18 +252,24 @@ class Orchestrator:
     def _build_constraints(self, host: InputHost) -> Dict[str, Any]:
         """Build constraints object from host parameters."""
         return {
-            "os_platform": host.platform,
-            "os_version": host.version_os,
-            "configurations": host.configurations or [],
-            "provided_vulnerabilities": host.vulnerabilities or [],
-            "security_controls": {
-                "firewall": host.firewall_status,
-                "antivirus": host.antivirus_status,
-                "mfa_enabled": host.mfa_enabled
+            "operating_system": host.OperatingSystem,
+            "os_version": host.OperatingSystemVersion,
+            "domain": host.DomainName,
+            "spns": host.ServicePrincipalNames or [],
+            "delegation": {
+                "trusted_for_delegation": host.TrustedForDelegation,
+                "trusted_to_auth_for_delegation": host.TrustedToAuthForDelegation,
+                "tgt_delegation": host.TGTDelegation
             },
-            "network": {
-                "internet_exposed": host.internet_exposed,
-                "domain": host.domain_membership
+            "privileges": {
+                "admin_count": host.adminCount,
+                "member_of": host.MemberOf or []
+            },
+            "trust_relationships": {
+                "source": host.Source,
+                "target": host.Target,
+                "trust_type": host.TrustType,
+                "direction": host.Direction
             }
         }
     
