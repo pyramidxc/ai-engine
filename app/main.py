@@ -2,11 +2,11 @@
 FastAPI application entry point.
 
 This module defines the REST API routes for the Attack Path Engine.
-Uses orchestrator pattern for production-grade attack path generation.
+Uses orchestrator pattern for attack path generation.
 
 Routes:
     - GET /health: Health check endpoint for monitoring
-    - POST /attack-path: Orchestrated attack path generation - Markdown
+    - POST /attack-path: Attack path generation - Markdown format
 """
 import uuid
 
@@ -25,7 +25,7 @@ from app.services.orchestrator import Orchestrator
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
-    description="AI-powered probabilistic attack tree generator"
+    description="AI-powered attack path analysis engine"
 )
 
 
@@ -61,20 +61,17 @@ def health():
 @app.post("/attack-path")
 async def generate_attack_tree(host: InputHost) -> Response:
     """
-    Generate orchestrated attack path in Markdown format.
+    Generate attack path analysis in Markdown format.
     
-    Full production orchestrator flow:
+    Orchestrator flow:
     1. Validate input parameters
     2. Initialize attack thread via Context Threader
-    3. Stage-by-stage generation loop:
-       - Request NextStageContext(N) from CT
-       - Build stage-specific prompt
+    3. Generate single stage:
+       - Build prompt with reconnaissance data
        - Call LLM provider
        - Parse and validate output
        - Reconcile with thread state
-       - Persist to storage
-    4. Decide next action (continue/stop/retry)
-    5. Emit telemetry and return result
+    4. Emit telemetry and return result
     
     Args:
         host (InputHost): Target host parameters from collector
@@ -106,6 +103,19 @@ async def generate_attack_tree(host: InputHost) -> Response:
             "timestamp": "unknown"
         }
     )
+    
+    # Check if error occurred
+    if result.get("status") == "error":
+        # Return error as markdown
+        error_content = _format_error_result(result)
+        return Response(
+            content=error_content,
+            media_type="text/markdown; charset=utf-8",
+            status_code=400,
+            headers={
+                "X-Request-ID": request_id
+            }
+        )
     
     # Format as markdown
     markdown_content = _format_orchestrated_result(result)
@@ -152,6 +162,38 @@ def _format_orchestrated_result(result: dict) -> str:
         f"- **Execution Time:** {result['metadata']['execution_time_seconds']}s",
         f"- **Tokens Used:** {result['metadata']['tokens_used']}",
         f"- **Model:** `{result['metadata']['model']}`",
+        ""
+    ]
+    
+    return "\n".join(sections)
+
+
+def _format_error_result(result: dict) -> str:
+    """
+    Format error result as markdown.
+    
+    Args:
+        result: Error response from orchestrator
+        
+    Returns:
+        Formatted markdown error document
+    """
+    sections = [
+        "# Attack Path Generation Error",
+        "",
+        f"**Request ID:** `{result['request_id']}`",
+        f"**Status:** {result['status']}",
+        f"**Error Type:** {result.get('error_type', 'unknown')}",
+        "",
+        "---",
+        "",
+        "## Error Details",
+        "",
+        "```",
+        f"{result.get('message', 'No error message provided')}",
+        "```",
+        "",
+        f"**Timestamp:** {result.get('timestamp', 'unknown')}",
         ""
     ]
     

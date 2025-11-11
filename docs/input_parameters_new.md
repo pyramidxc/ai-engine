@@ -303,52 +303,7 @@
 }
 ```
 
-### Scenario 4: GPO Configuration
-
-```json
-{
-  "id": "{31B2F340-016D-11D2-945F-00C04FB984F9}",
-  "DisplayName": "Default Domain Policy",
-  "DomainName": "corp.local",
-  "DistinguishedName": "CN={31B2F340-016D-11D2-945F-00C04FB984F9},CN=Policies,CN=System,DC=corp,DC=local",
-  "path": "CN={31B2F340-016D-11D2-945F-00C04FB984F9},CN=Policies,CN=System,DC=corp,DC=local",
-  "Path": "\\\\corp.local\\SYSVOL\\corp.local\\Policies\\{31B2F340-016D-11D2-945F-00C04FB984F9}",
-  "GpoStatus": "AllSettingsEnabled",
-  "SysvolVersion": 655,
-  "DSVersion": 655,
-  "computer": ["Scripts", "Security", "Registry"],
-  "user": ["Scripts", "Preferences"],
-  "WmiFilter": "SELECT * FROM Win32_OperatingSystem WHERE Version >= '10.0.0'",
-  "LinkedGroupPolicyObjects": ["LDAP://DC=corp,DC=local"]
-}
-```
-
-### Scenario 5: Trust Relationship
-
-```json
-{
-  "Source": "corp.local",
-  "Target": "child.corp.local",
-  "Direction": "BiDirectional",
-  "TrustType": "ParentChild",
-  "ForestTransitive": true,
-  "IntraForest": true,
-  "SelectiveAuthentication": false,
-  "SIDFilteringForestAware": true,
-  "TGTDelegation": true
-}
-```
-
----
-
 ## Implementation Notes
-
-### Model Definition
-
-- **File:** `app/models/host.py`
-- **Class:** `InputHost(BaseModel)`
-- **Validation:** Pydantic with type safety
-- **Required Fields:** At least one identity field (DNSHostName, SamAccountName, DistinguishedName, or DomainName)
 
 ### Design Philosophy
 
@@ -386,5 +341,5 @@ These parameters are typically collected from:
 
 **Document Version:** 2.0  
 **Last Updated:** 2025-11-10  
-**AI Engine Version:** 1.0.0  
+**AI Engine Version:** 7.2.0  
 **Total Parameters Documented:** 40+

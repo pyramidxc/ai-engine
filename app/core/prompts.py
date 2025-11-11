@@ -11,26 +11,8 @@ class PromptBuilder:
     """Builds prompts for attack path generation."""
     
     SYSTEM_MESSAGE = (
-        "You are an expert Active Directory penetration tester analyzing security reconnaissance data "
-        "to generate realistic attack paths. You understand offensive security fundamentals, "
-        "Active Directory architecture, Kerberos authentication, and how Windows domain environments work.\n\n"
-        
-        "CORE PRINCIPLES:\n"
-        "1. Understand the target AD environment and what's actually possible\n"
-        "2. Base all decisions on the provided Active Directory reconnaissance data\n"
-        "3. Provide probabilistic assessments: main path + alternatives with likelihood\n"
-        "4. Use appropriate AD techniques (Kerberoasting, delegation abuse, GPO attacks, etc.)\n"
-        "5. Build on previous state - each step should logically follow\n\n"
-        
-        "OUTPUT FORMAT:\n"
-        "For each state, provide:\n"
-        "- Current access level\n"
-        "- Main attack action (with probability)\n"
-        "- Alternative actions (with probabilities)\n"
-        "- Technical details (commands, tools)\n"
-        "- Expected outcome\n\n"
-        
-        "Think like a real penetration tester who understands how Active Directory actually works."
+        "You are an expert security analyst generating attack path analysis based on provided reconnaissance data and instructions. "
+        "Follow the instructions precisely and base all decisions on the provided data."
     )
     
     @staticmethod
@@ -186,37 +168,4 @@ class PromptBuilder:
             if "current_access" in context:
                 prompt_parts.append(f"Current access level: {context['current_access']}")
         
-        prompt_parts.append("")
-        prompt_parts.append("=== YOUR TASK ===")
-        prompt_parts.append("Based on the reconnaissance data and current state, determine:")
-        prompt_parts.append("1. What's the best next action? (with probability)")
-        prompt_parts.append("2. What are viable alternatives? (with probabilities)")
-        prompt_parts.append("3. How would you execute each approach?")
-        prompt_parts.append("4. What access would each approach gain?")
-        
         return "\n".join(prompt_parts)
-    
-    @staticmethod
-    def build_attack_tree_prompt(host: InputHost) -> str:
-        """Generates complete attack tree generation prompt."""
-        recon_summary = PromptBuilder.build_reconnaissance_summary(host)
-        
-        return f"""=== RECONNAISSANCE DATA ===
-{recon_summary}
-
-=== YOUR TASK ===
-Generate a complete attack path from initial access to final objective.
-
-For each step, provide:
-1. Main action (with probability)
-2. Alternative approaches (with probabilities)
-3. Technical execution details
-4. Expected outcomes
-
-Start with initial access and progress logically based on what each step achieves."""
-    
-    @staticmethod
-    def build_full_attack_tree_prompt(host: InputHost) -> str:
-        """Generates prompt for complete attack tree (legacy compatibility)."""
-        # For now, use same minimal approach as build_attack_tree_prompt
-        return PromptBuilder.build_attack_tree_prompt(host)

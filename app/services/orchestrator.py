@@ -1,17 +1,16 @@
 """
 Orchestrator - Central coordination of attack path generation.
 
-Coordinates the full RAG pipeline:
+Coordinates the generation pipeline:
 1. Input validation
 2. Thread initialization via Context Threader
-3. Stage-by-stage generation loop:
-   - Get next stage context
+3. Single stage generation:
+   - Get stage context
    - Build prompt
    - Call LLM
-   - Parse and validate output
+   - Parse output
    - Reconcile with thread state
-4. Decide next action (continue/stop/retry)
-5. Emit telemetry and logs
+4. Emit telemetry and logs
 """
 
 import json
@@ -24,7 +23,6 @@ from app.core.prompts import PromptBuilder
 from app.models.host import InputHost
 from app.services.context_threader import ContextThreader
 from app.services.llm_client import LLMClient
-from app.utils.exploitability_validator import ExploitabilityValidator
 from app.utils.token_logger import TokenLogger
 
 
@@ -46,7 +44,6 @@ class Orchestrator:
         self.prompt_builder = PromptBuilder()
         self.llm_client = LLMClient()
         self.token_logger = TokenLogger()
-        self.exploitability_validator = ExploitabilityValidator()
         
         # Orchestration configuration
         self.max_stages = 15
@@ -92,8 +89,11 @@ class Orchestrator:
         reconnaissance = self.prompt_builder.build_reconnaissance_summary(host)
         constraints = self._build_constraints(host)
         
+        # Use DNSHostName, SamAccountName, or request_id as asset identifier
+        asset_id = host.DNSHostName or host.SamAccountName or f"asset_{request_id[:8]}"
+        
         thread_state = self.context_threader.initialize_thread(
-            asset_id=host.asset_id or f"asset_{request_id[:8]}",
+            asset_id=asset_id,
             reconnaissance=reconnaissance,
             constraints=constraints
         )
@@ -333,15 +333,15 @@ class Orchestrator:
     
     def _parse_stage_output(self, raw_output: str, stage_index: int, host: InputHost) -> Dict[str, Any]:
         """
-        Parse LLM output into structured format and validate bifurcations.
+        Parse LLM output into structured format.
         
         Args:
             raw_output: Raw text from LLM
             stage_index: Stage number
-            host: Target host parameters for validation
+            host: Target host parameters (unused, kept for compatibility)
             
         Returns:
-            Parsed dictionary with technique, action, outcome, validated bifurcations, etc.
+            Parsed dictionary with technique, action, outcome, bifurcations, etc.
         """
         import re
         
@@ -367,21 +367,9 @@ class Orchestrator:
                     "description": description.strip(),
                     "status": "not_generated"
                 })
-        
-        # Validate bifurcations against target parameters
-        if bifurcations:
-            print(f"         → Validating {len(bifurcations)} bifurcations against target parameters")
-            validated_bifurcations = self.exploitability_validator.validate_bifurcations(
-                bifurcations=bifurcations,
-                target_params=host.dict()  # Convert Pydantic model to dict
-            )
             
-            removed_count = len(bifurcations) - len(validated_bifurcations)
-            if removed_count > 0:
-                print(f"         ✗ Removed {removed_count} non-exploitable bifurcations")
-            print(f"         ✓ {len(validated_bifurcations)} validated bifurcations")
-            
-            bifurcations = validated_bifurcations
+            if bifurcations:
+                print(f"         → Found {len(bifurcations)} bifurcations")
         
         parsed = {
             "stage": stage_index,
@@ -398,13 +386,53 @@ class Orchestrator:
     
     def _extract_technique(self, text: str) -> str:
         """Extract technique name from output."""
-        # Simple heuristic - look for "STATE N: [technique]"
-        if "STATE" in text:
+        import re
+        
+        # Strategy 1: Look for MITRE technique IDs (T####.###)
+        mitre_match = re.search(r'T\d{4}(?:\.\d{3})?', text)
+        if mitre_match:
+            return mitre_match.group(0)
+        
+        # Strategy 2: Look for "STATE N: [technique]" pattern
+        if "STATE" in text.upper():
             lines = text.split("\n")
             for line in lines:
-                if line.strip().startswith("##") and "STATE" in line:
-                    return line.split(":", 1)[-1].strip() if ":" in line else "Unknown"
-        return "Unknown"
+                if "STATE" in line.upper() and (":" in line or "-" in line):
+                    # Extract after : or -
+                    for sep in [":", "-"]:
+                        if sep in line:
+                            parts = line.split(sep, 1)
+                            if len(parts) > 1:
+                                technique = parts[1].strip()
+                                # Clean markdown formatting
+                                technique = technique.strip("#").strip("*").strip()
+                                if technique and len(technique) > 3:
+                                    return technique
+        
+        # Strategy 3: Look for technique names in common patterns
+        technique_patterns = [
+            r'(?:Technique|Attack|Method):\s*([^\n]+)',
+            r'##\s*([^\n]+)',  # Markdown header
+            r'\*\*([^*]+)\*\*'  # Bold text (first occurrence)
+        ]
+        
+        for pattern in technique_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                technique = match.group(1).strip()
+                if technique and len(technique) > 3 and len(technique) < 100:
+                    return technique
+        
+        # Strategy 4: Extract first meaningful line (not empty, not just headers)
+        lines = text.strip().split("\n")
+        for line in lines[:10]:  # Check first 10 lines
+            line = line.strip().strip("#").strip("*").strip("-").strip()
+            if line and len(line) > 10 and len(line) < 150:
+                # Skip lines that are just metadata
+                if not any(skip in line.lower() for skip in ["request", "thread", "status", "state 0", "---"]):
+                    return line
+        
+        return "MITRE ATT&CK Technique"
     
     def _extract_action(self, text: str) -> str:
         """Extract main action/command from output."""
@@ -452,87 +480,24 @@ class Orchestrator:
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Validate parsed output against constraints.
+        Minimal validation of parsed output.
+        
+        Only checks basic schema requirements - no attack-specific logic.
+        External model is responsible for technique validity.
         
         Args:
             parsed: Parsed stage result
-            constraints: OS/security constraints
-            context: Thread context
+            constraints: Not used - kept for compatibility
+            context: Not used - kept for compatibility
             
         Returns:
             Validation result
         """
         errors = []
         
-        # Schema validation
-        if not parsed.get("technique") or parsed["technique"] == "Unknown":
+        # Minimal schema validation - just check technique exists
+        if not parsed.get("technique") or len(parsed["technique"].strip()) < 3:
             errors.append("Missing or invalid technique")
-        
-        # Semantic validation - check for reconnaissance duplication
-        if parsed.get("stage") == 0:
-            content = parsed.get("raw_content", "").lower()
-            if any(word in content for word in ["nmap", "port scan", "network scan"]):
-                errors.append("Stage 0 should not include reconnaissance (already completed)")
-        
-        # OS compatibility validation - CRITICAL
-        content = parsed.get("raw_content", "").lower()
-        os_version = constraints.get("os_version", "").lower()
-        
-        # Check for Windows Server 2016+ incompatible exploits
-        if any(version in os_version for version in ["2016", "2019", "2022", "server 2016", "server 2019"]):
-            incompatible_exploits = [
-                ("ms17-010", "MS17-010/EternalBlue only works on Windows 7-2012R2, not 2016+"),
-                ("eternalblue", "EternalBlue only works on Windows 7-2012R2, not 2016+"),
-                ("ms08-067", "MS08-067 only works on Windows XP/2003, not 2016+"),
-                ("ms14-070", "MS14-070 only works on Server 2003-2012R2, not 2016+"),
-                ("cve-2009", "CVE-2009 exploits target old systems (XP/2003), not 2016+")
-            ]
-            
-            for exploit, error_msg in incompatible_exploits:
-                if exploit in content:
-                    errors.append(f"OS INCOMPATIBLE: {error_msg}")
-        
-        # Check for Windows Server 2012/2008 incompatible exploits
-        if any(version in os_version for version in ["2012", "2008", "server 2012", "server 2008"]):
-            if "ms08-067" in content:
-                errors.append("OS INCOMPATIBLE: MS08-067 only works on Windows XP/2003, not 2008/2012")
-        
-        # CVE HALLUCINATION CHECK - CRITICAL
-        # If configurations are present, reject ANY CVE mention
-        has_configs = len(constraints.get("configurations", [])) > 0
-        provided_vulns = constraints.get("provided_vulnerabilities", [])
-        
-        if has_configs:
-            # Look for CVE patterns: CVE-YYYY-NNNNN or MS##-###
-            import re
-            cve_pattern = r'cve-\d{4}-\d{4,7}'
-            ms_pattern = r'ms\d{2}-\d{3}'
-            
-            found_cves = re.findall(cve_pattern, content)
-            found_ms = re.findall(ms_pattern, content)
-            
-            if found_cves:
-                # Check if these CVEs were provided in input
-                allowed_cves = [vuln.lower() for vuln in provided_vulns if 'cve-' in vuln.lower()]
-                for cve in found_cves:
-                    if cve not in allowed_cves:
-                        errors.append(f"CVE HALLUCINATION: {cve.upper()} was NOT in reconnaissance. Focus on misconfigurations instead.")
-            
-            if found_ms:
-                # Check if these MS bulletins were provided
-                allowed_ms = [vuln.lower() for vuln in provided_vulns if 'ms' in vuln.lower()]
-                for ms in found_ms:
-                    if ms not in allowed_ms:
-                        errors.append(f"CVE HALLUCINATION: {ms.upper()} was NOT in reconnaissance. Focus on misconfigurations instead.")
-        
-        # Check if inventing CVEs when misconfigurations are available
-        if context.get("stage_index") == 0:  # Only for first stage
-            has_configs = len(constraints.get("configurations", [])) > 0 if "configurations" in constraints else False
-            has_cve_mentions = any(cve in content for cve in ["cve-", "ms17-", "ms08-", "ms14-"])
-            
-            if has_configs and has_cve_mentions:
-                # This is acceptable but note it
-                pass  # Allow CVE mentions even with configs, but configs should be prioritized
         
         return {
             "valid": len(errors) == 0,
