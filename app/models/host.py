@@ -5,14 +5,13 @@ This module defines the input data structure for the Attack Path Engine.
 It uses Pydantic for data validation and type safety, ensuring that all
 incoming data from external vulnerability collectors is properly validated.
 
-The InputHost model accepts 50+ optional parameters organized into 12 categories,
-allowing flexible integration with various data sources while maintaining
-a consistent interface.
+The InputHost model accepts Active Directory and infrastructure parameters
+organized into 13 categories, focused on domain security and configuration analysis.
 
 Design Philosophy:
-    - All fields are optional (no required fields except indirectly)
+    - All fields are optional (no required fields)
     - More context = better attack path generation
-    - Supports partial data from any vulnerability scanner
+    - Supports partial data from any AD collector
     - Backward compatible with any subset of parameters
 
 Architecture Role:
@@ -23,21 +22,20 @@ Architecture Role:
 
 Usage:
     >>> # Minimal input
-    >>> host = InputHost(platform="Linux", open_ports=[22, 80])
+    >>> host = InputHost(OperatingSystem="Windows Server 2019", DNSHostName="dc01.corp.local")
     
     >>> # Rich input
     >>> host = InputHost(
-    ...     platform="Linux",
-    ...     version_os="Ubuntu 20.04",
-    ...     asset_criticality="High",
-    ...     mfa_enabled=False,
-    ...     security_controls=["CrowdStrike EDR"],
-    ...     vulnerabilities=["CVE-2023-12345"]
+    ...     OperatingSystem="Windows Server 2019",
+    ...     DNSHostName="dc01.corp.local",
+    ...     adminCount=1,
+    ...     TrustedForDelegation=True,
+    ...     MemberOf=["CN=Domain Admins,CN=Users,DC=corp,DC=local"]
     ... )
 """
 from typing import Optional
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field
 
 # =============================================================================
 # Input Host Model
@@ -45,14 +43,14 @@ from pydantic import BaseModel, Field
 
 class InputHost(BaseModel):
     """
-    Input model for host exposure data from external vulnerability collectors.
+    Input model for Active Directory and infrastructure data from external collectors.
     
     This model defines the complete data structure accepted by the Attack Path
-    Engine. It supports 50+ optional parameters organized into 12 logical
-    categories, allowing flexible integration with various data sources.
+    Engine, focused on Active Directory security analysis. It supports 40+ optional
+    parameters organized into 13 logical categories.
     
     Key Features:
-        - All 50+ fields are optional for maximum flexibility
+        - All fields are optional for maximum flexibility
         - Organized into logical categories for clarity
         - Self-documenting with detailed Field descriptions
         - Supports any combination of parameters
@@ -60,509 +58,440 @@ class InputHost(BaseModel):
     
     Design Rationale:
         The optional nature of all fields allows the engine to work with:
-        - Minimal scanner output (just platform + ports)
-        - Rich CMDB data (comprehensive asset context)
+        - Minimal AD scanner output
+        - Rich CMDB/AD data
         - Partial data from multiple sources
         - Any combination in between
     
     Integration Examples:
-        - Nmap: platform, open_ports, services
-        - OpenVAS: vulnerabilities, services, patch_level
-        - CMDB: asset_name, criticality, business_role
-        - Cloud API: cloud_provider, iam_roles, instance_type
-        - EDR: security_controls, installed_software
+        - BloodHound: SamAccountName, MemberOf, adminCount, SPNs
+        - Active Directory: DistinguishedName, objectSid, GPO links
+        - Security Tools: nTSecurityDescriptor, delegation settings
     
     Parameter Categories:
-        1. Core System Info (2 params)
-        2. Network & Services (3 params)
-        3. Asset Identification (5 params)
-        4. Network Context (3 params)
-        5. Security Controls (5 params)
-        6. Identity & Access (7 params)
+        1. Core System Info (6 params)
+        2. Network & Services (6 params)
+        3. Asset Identification (6 params)
+        4. Network Context (8 params)
+        5. Security Controls (6 params)
+        6. Identity & Access (6 params)
         7. Software & Applications (4 params)
-        8. Patch & Vulnerability (5 params)
-        9. Configuration & Compliance (3 params)
-        10. Asset Context & Risk (4 params)
-        11. Cloud & Containers (5 params)
+        8. Patch & Vulnerability Management (3 params)
+        9. Configuration & Compliance (4 params)
+        10. Asset Context & Risk (3 params)
+        11. Cloud & Containers (0 params - reserved)
         12. Backup & Storage (2 params)
-        13. Threat Intelligence (2 params)
+        13. Threat Intelligence (5 params)
     
-    Total Parameters: 50+
+    Total Parameters: 40+
     
     Example:
         >>> # Create minimal input
-        >>> minimal = InputHost(platform="Linux", open_ports=[22, 80])
-        >>> print(minimal.platform)
-        'Linux'
+        >>> minimal = InputHost(OperatingSystem="Windows Server 2019", DNSHostName="dc01.corp.local")
+        >>> print(minimal.OperatingSystem)
+        'Windows Server 2019'
         
         >>> # Create comprehensive input
         >>> comprehensive = InputHost(
-        ...     platform="Linux",
-        ...     version_os="Ubuntu 20.04.3 LTS",
-        ...     asset_name="web-prod-01",
-        ...     asset_criticality="Critical",
-        ...     internet_exposed=True,
-        ...     open_ports=[22, 80, 443, 3306],
-        ...     services=["SSH", "Apache", "MySQL"],
-        ...     vulnerabilities=["CVE-2023-12345: SQL Injection"],
-        ...     security_controls=["CrowdStrike Falcon EDR"],
-        ...     mfa_enabled=False,
-        ...     admin_accounts=["root", "dbadmin"],
-        ...     patch_level="Missing critical patches",
-        ...     environment="Production"
+        ...     OperatingSystem="Windows Server 2019 Standard",
+        ...     OperatingSystemVersion="10.0.17763",
+        ...     DNSHostName="dc01.corp.local",
+        ...     IPv4Address="10.0.10.50",
+        ...     SamAccountName="administrator",
+        ...     DomainName="corp.local",
+        ...     adminCount=1,
+        ...     TrustedForDelegation=True,
+        ...     MemberOf=["CN=Domain Admins,CN=Users,DC=corp,DC=local"]
         ... )
-        >>> print(comprehensive.asset_criticality)
-        'Critical'
+        >>> print(comprehensive.adminCount)
+        1
     
     See Also:
-        - docs/INPUT_PARAMETERS.md: Complete parameter reference
-        - test_scenarios/: Example JSON files with various parameter combinations
+        - docs/input_parameters_new.md: Complete parameter reference
+        - examples/: Example JSON files with various parameter combinations
     """
     
     # =============================================================================
     # CATEGORY 1: CORE SYSTEM INFO
     # =============================================================================
-    # Fundamental OS information - typically available from any scanner.
-    # These are often the starting points for attack path generation.
+    # Sistema operativo y versiones - información fundamental del host
     
-    platform: Optional[str] = Field(
+    OperatingSystem: Optional[str] = Field(
         None,
-        description="Operating system platform (e.g., Linux, Windows, macOS)"
-        # Examples: "Linux", "Windows", "macOS", "AIX", "Solaris"
-        # Source: Nmap OS detection, SCCM, Nessus, OpenVAS
+        description="Sistema operativo detectado en el equipo"
+        # Examples: "Windows Server 2019 Standard", "Windows Server 2016", "Windows 10"
+        # Source: Active Directory, WMI queries
     )
-    version_os: Optional[str] = Field(
+    OperatingSystemVersion: Optional[str] = Field(
         None,
-        description="Operating system version (e.g., Ubuntu 20.04, Windows Server 2019)"
-        # Examples: "Ubuntu 20.04.3 LTS", "Windows Server 2019", "macOS 12.3.1"
-        # Used for: Identifying version-specific vulnerabilities and exploits
+        description="Versión del sistema operativo"
+        # Examples: "10.0.17763", "10.0.14393", "6.1.7601"
+        # Used for: Identifying version-specific vulnerabilities
+    )
+    OperatingSystemServicePack: Optional[str] = Field(
+        None,
+        description="Service Pack instalado en el sistema"
+        # Examples: "Service Pack 2", "Service Pack 1", ""
+        # Source: System configuration queries
+    )
+    OperatingSystemHotfix: Optional[list[str]] = Field(
+        default=None,
+        description="Lista de actualizaciones o KB instaladas"
+        # Examples: ["KB5021234", "KB5030015", "KB5037764"]
+        # Source: WSUS, SCCM, WMI
+        # Critical for: Identifying missing patches
+    )
+    SysvolVersion: Optional[int] = Field(
+        None,
+        description="Versión de la política replicada en SYSVOL"
+        # Examples: 655, 720, 801
+        # Source: GPO version queries
+        # Used for: GPO synchronization validation
+    )
+    DSVersion: Optional[int] = Field(
+        None,
+        description="Versión del objeto en el Directorio Activo"
+        # Examples: 655, 720, 801
+        # Source: Active Directory queries
+        # Used for: Version consistency checks
     )
     
     # =============================================================================
     # CATEGORY 2: NETWORK & SERVICES
     # =============================================================================
-    # Network exposure and running services - critical for attack surface analysis.
-    # Used to identify potential entry points and lateral movement paths.
+    # Configuración de red y servicios Kerberos
     
-    open_ports: Optional[list[int]] = Field(
-        default=None,
-        description="List of open ports detected on the host"
-        # Examples: [22, 80, 443, 3306, 5432, 8080]
-        # Source: Nmap, Masscan, network scanners
-        # Impact: Each open port is a potential attack vector
+    DNSHostName: Optional[str] = Field(
+        None,
+        description="Nombre FQDN completo del equipo"
+        # Examples: "web01.corp.local", "dc01.corp.local", "sql01.child.corp.local"
+        # Source: DNS, Active Directory
     )
-    services: Optional[list[str]] = Field(
-        default=None,
-        description="Services running on open ports (e.g., 'SSH on port 22', 'Apache 2.4.41 on port 80')"
-        # Examples: ["OpenSSH 8.2p1 on port 22", "Apache httpd 2.4.41 on port 80"]
-        # Source: Nmap service detection, Nessus, OpenVAS
-        # Used for: Service-specific vulnerability mapping
+    IPv4Address: Optional[str] = Field(
+        None,
+        description="Dirección IPv4 asignada al host"
+        # Examples: "10.0.10.50", "192.168.1.100", "172.16.0.5"
+        # Source: DNS, DHCP, network scans
     )
-    vulnerabilities: Optional[list[str]] = Field(
+    ServicePrincipalNames: Optional[list[str]] = Field(
         default=None,
-        description="Known vulnerabilities (CVEs, descriptions, etc.)"
-        # Examples: ["CVE-2023-12345: SQL Injection", "CVE-2022-67890: RCE in Apache"]
-        # Source: Nessus, OpenVAS, Qualys, Tenable
-        # Critical for: Direct exploit path identification
+        description="SPNs (Service Principal Names) asociados a la cuenta"
+        # Examples: ["MSSQLSvc/db01.corp.local:1433", "HTTP/web01.corp.local"]
+        # Source: Active Directory attribute queries
+        # Critical for: Kerberoasting attacks
+    )
+    TrustedForDelegation: Optional[bool] = Field(
+        None,
+        description="Indica si la cuenta o equipo está marcado como confiable para delegación Kerberos"
+        # Values: True (delegation enabled), False (not trusted)
+        # Source: AD userAccountControl flags
+        # Risk: Enables credential theft via delegation abuse
+    )
+    TrustedToAuthForDelegation: Optional[bool] = Field(
+        None,
+        description="Permite autenticación delegada para servicios específicos"
+        # Values: True (constrained delegation), False (no delegation)
+        # Source: AD msDS-AllowedToDelegateTo attribute
+        # Impact: Limited delegation to specific services
+    )
+    TGTDelegation: Optional[bool] = Field(
+        None,
+        description="Indica si se permite la delegación de tickets TGT entre dominios"
+        # Values: True (TGT can be delegated), False (no TGT delegation)
+        # Source: Trust relationship configuration
+        # Risk: Allows cross-domain ticket delegation
     )
     
     # =============================================================================
     # CATEGORY 3: ASSET IDENTIFICATION
     # =============================================================================
-    # Unique identifiers and naming information - used for asset correlation
-    # and tracking across different data sources.
+    # Identificadores únicos del objeto en Active Directory
     
-    asset_id: Optional[str] = Field(
+    SamAccountName: Optional[str] = Field(
         None,
-        description="Unique asset identifier"
-        # Examples: "ASSET-12345", "a1b2c3d4-e5f6-7890"
-        # Source: CMDB, Asset Management systems
+        description="Nombre de cuenta único en el dominio"
+        # Examples: "administrator", "jdoe", "svc_sql"
+        # Source: Active Directory sAMAccountName attribute
     )
-    asset_name: Optional[str] = Field(
+    DistinguishedName: Optional[str] = Field(
         None,
-        description="Device hostname or asset name"
-        # Examples: "web-prod-01", "db-server-nyc", "john-laptop"
-        # Source: DNS, DHCP, host configuration
+        description="Nombre distinguido completo (DN) del objeto en AD"
+        # Examples: "CN=John Doe,OU=Usuarios,DC=corp,DC=local"
+        # Source: Active Directory distinguishedName attribute
+        # Used for: LDAP queries and object hierarchy
     )
-    mac_addresses: Optional[list[str]] = Field(
-        default=None,
-        description="MAC addresses for network identification"
-        # Examples: ["00:1A:2B:3C:4D:5E", "AA:BB:CC:DD:EE:FF"]
-        # Source: Network scanners, DHCP logs, switch MAC tables
-    )
-    ip_addresses: Optional[list[str]] = Field(
-        default=None,
-        description="IP addresses (IPv4/IPv6)"
-        # Examples: ["10.0.1.50", "203.0.113.42", "2001:db8::1"]
-        # Source: Network scanners, DHCP, DNS
-        # Note: Multiple IPs common for multi-homed hosts
-    )
-    fqdn: Optional[str] = Field(
+    Name: Optional[str] = Field(
         None,
-        description="Fully qualified domain name"
-        # Examples: "web-prod-01.corp.example.com", "mail.example.com"
-        # Source: DNS, host configuration
+        description="Nombre descriptivo del objeto"
+        # Examples: "John Doe", "Domain Controllers", "Default Domain Policy"
+        # Source: Active Directory name/cn attribute
+    )
+    objectSid: Optional[str] = Field(
+        None,
+        description="Identificador de seguridad (SID) del objeto"
+        # Examples: "S-1-5-21-3623811015-3361044348-30300820-500"
+        # Source: Active Directory objectSid attribute
+        # Critical for: Access control and permissions
+    )
+    id: Optional[str] = Field(
+        None,
+        description="Identificador único (GUID) de la GPO u otro objeto"
+        # Examples: "{31B2F340-016D-11D2-945F-00C04FB984F9}"
+        # Source: Active Directory objectGUID attribute
+    )
+    DomainName: Optional[str] = Field(
+        None,
+        description="Nombre del dominio al que pertenece el objeto"
+        # Examples: "corp.local", "child.corp.local", "domain.com"
+        # Source: Domain DNS name from AD
     )
     
     # =============================================================================
     # CATEGORY 4: NETWORK CONTEXT
     # =============================================================================
-    # Network positioning and exposure - critical for understanding attack surface.
-    # Determines whether external or internal attack paths are more realistic.
+    # Relaciones de confianza entre dominios y contexto de red
     
-    network_segment: Optional[str] = Field(
+    Target: Optional[str] = Field(
         None,
-        description="Network segment (e.g., DMZ, Internal, Isolated, Public-facing)"
-        # Examples: "DMZ", "Internal", "Production", "Guest Network", "OT/SCADA"
-        # Source: CMDB, Network diagrams, VLAN configuration
-        # Impact: DMZ/Public = external attacks, Internal = lateral movement
+        description="Dominio de destino de la relación de confianza"
+        # Examples: "child.corp.local", "partner.com", "external.org"
+        # Source: Trust relationship queries
     )
-    internet_exposed: Optional[bool] = Field(
+    Source: Optional[str] = Field(
         None,
-        description="Whether the asset is exposed to the internet"
-        # Values: True (public IP, NAT forwarding), False (internal only)
-        # Source: Firewall rules, Shodan, external scans
-        # Critical: Determines initial access vectors
+        description="Dominio de origen de la relación de confianza"
+        # Examples: "corp.local", "parent.local"
+        # Source: Trust relationship queries
     )
-    firewall_rules: Optional[list[str]] = Field(
-        default=None,
-        description="Firewall configuration and rules"
-        # Examples: ["Allow TCP 443 from 0.0.0.0/0", "Block TCP 22 except from 10.0.0.0/8"]
-        # Source: Firewall configs, security policies
-        # Used for: Understanding access restrictions
+    Direction: Optional[str] = Field(
+        None,
+        description="Dirección de la relación de confianza"
+        # Examples: "BiDirectional", "Inbound", "Outbound"
+        # Source: Trust configuration
+        # Impact: Determines authentication flow
+    )
+    TrustType: Optional[str] = Field(
+        None,
+        description="Tipo de confianza configurada entre dominios"
+        # Examples: "Forest", "External", "ParentChild", "TreeRoot"
+        # Source: Trust type attribute
+    )
+    ForestTransitive: Optional[bool] = Field(
+        None,
+        description="Indica si la relación de confianza es transitiva a nivel de bosque"
+        # Values: True (transitive), False (non-transitive)
+        # Source: Trust attributes
+        # Risk: Transitive trusts enable lateral movement across forests
+    )
+    IntraForest: Optional[bool] = Field(
+        None,
+        description="Indica si la relación de confianza es interna al mismo bosque"
+        # Values: True (same forest), False (external)
+        # Source: Forest configuration
+    )
+    SelectiveAuthentication: Optional[bool] = Field(
+        None,
+        description="Requiere autenticación selectiva para el trust"
+        # Values: True (selective auth required), False (forest-wide auth)
+        # Source: Trust security settings
+        # Impact: Limits authentication scope across trust
+    )
+    SIDFilteringForestAware: Optional[bool] = Field(
+        None,
+        description="Filtrado SID activo en la relación de confianza"
+        # Values: True (SID filtering enabled), False (disabled)
+        # Source: Trust security configuration
+        # Security: Prevents SID history attacks
     )
     
     # =============================================================================
     # CATEGORY 5: SECURITY CONTROLS
     # =============================================================================
-    # Defensive mechanisms in place - determines attack difficulty and bypass strategies.
-    # Presence/absence of controls directly influences attack path feasibility.
+    # Controles de seguridad y configuración del objeto
     
-    security_controls: Optional[list[str]] = Field(
-        default=None,
-        description="Security solutions (e.g., CrowdStrike EDR, Palo Alto Firewall, Windows Defender)"
-        # Examples: ["CrowdStrike Falcon EDR - Active", "Palo Alto NGFW", "Windows Defender"]
-        # Source: EDR consoles, SCCM, security tool inventory
-        # Impact: Each control requires specific bypass techniques
-    )
-    edr_agent: Optional[str] = Field(
+    Enabled: Optional[bool] = Field(
         None,
-        description="EDR/antivirus agent name and status"
-        # Examples: "CrowdStrike Falcon - Active", "Carbon Black - Outdated", "None"
-        # Source: Endpoint management tools
-        # Critical: EDR presence forces attackers to use evasion techniques
+        description="Indica si la cuenta u objeto está habilitado"
+        # Values: True (enabled), False (disabled)
+        # Source: AD userAccountControl flags
     )
-    antivirus_status: Optional[str] = Field(
+    adminCount: Optional[int] = Field(
         None,
-        description="Antivirus status (Active, Disabled, Not Installed)"
-        # Values: "Active", "Disabled", "Outdated", "Not Installed"
-        # Source: Windows Security Center, endpoint management
+        description="Define si el objeto está marcado como privilegiado"
+        # Values: 1 (privileged/protected), 0 (not protected)
+        # Source: AD adminCount attribute
+        # Critical: Indicates membership in protected groups
     )
-    firewall_status: Optional[str] = Field(
+    PasswordNeverExpires: Optional[bool] = Field(
         None,
-        description="Firewall status (Enabled, Disabled)"
-        # Values: "Enabled", "Disabled", "Misconfigured"
-        # Source: Host firewall config (iptables, Windows Firewall)
+        description="Contraseña configurada para no expirar"
+        # Values: True (never expires), False (normal expiration)
+        # Source: AD userAccountControl flags
+        # Risk: Password never rotates
     )
-    encryption_status: Optional[str] = Field(
+    ProtectedFromAccidentalDeletion: Optional[bool] = Field(
         None,
-        description="Disk encryption status (e.g., BitLocker Enabled, FileVault, LUKS)"
-        # Examples: "BitLocker Enabled", "FileVault Active", "Not Encrypted"
-        # Source: Encryption management tools
-        # Impact: Limits offline attack vectors
+        description="Protección contra eliminación accidental habilitada"
+        # Values: True (protected), False (not protected)
+        # Source: Object protection attribute
+    )
+    nTSecurityDescriptor: Optional[str] = Field(
+        None,
+        description="Descriptor de seguridad del objeto con ACLs detalladas"
+        # Examples: "(A;;RPWPCCDCLCRCSWRCWDWOGA;;;S-1-5-21-3623811015-3361044348-30300820-500)"
+        # Source: AD nTSecurityDescriptor attribute
+        # Critical for: ACL abuse analysis
+    )
+    WmiFilter: Optional[str] = Field(
+        None,
+        description="Filtro WMI aplicado en la GPO"
+        # Examples: "SELECT * FROM Win32_OperatingSystem WHERE Version >= '10.0.0' AND ProductType = '1'"
+        # Source: GPO WMI filter configuration
+        # Used for: Conditional GPO application
     )
     
     # =============================================================================
     # CATEGORY 6: IDENTITY & ACCESS
     # =============================================================================
-    # User accounts and authentication mechanisms - key for privilege escalation
-    # and lateral movement paths. Weak IAM is a common attack vector.
+    # Membresía de grupos y políticas vinculadas
     
-    domain_membership: Optional[str] = Field(
-        None,
-        description="Active Directory domain or workgroup"
-        # Examples: "corp.example.com", "WORKGROUP", "child.corp.example.com"
-        # Source: Active Directory, host configuration
-        # Impact: Domain membership enables Kerberos attacks, GPO abuse
-    )
-    organizational_unit: Optional[str] = Field(
-        None,
-        description="Active Directory OU path"
-        # Examples: "OU=Servers,OU=Production,DC=corp,DC=example,DC=com"
-        # Source: Active Directory queries
-        # Used for: Understanding GPO application and admin access patterns
-    )
-    user_accounts: Optional[list[str]] = Field(
+    MemberOf: Optional[list[str]] = Field(
         default=None,
-        description="Local and domain user accounts"
-        # Examples: ["CORP\\john.doe", "root", "administrator", "service_user"]
-        # Source: Local account enumeration, AD queries
+        description="Lista de grupos de los que el usuario es miembro"
+        # Examples: ["CN=Domain Admins,CN=Users,DC=corp,DC=local", "CN=IT Support,CN=Users,DC=corp,DC=local"]
+        # Source: AD memberOf attribute
+        # Critical for: Privilege analysis and attack paths
     )
-    admin_accounts: Optional[list[str]] = Field(
+    Members: Optional[list[str]] = Field(
         default=None,
-        description="Privileged/administrator accounts"
-        # Examples: ["root", "Administrator", "CORP\\domain_admins"]
-        # Source: Group membership queries, sudoers file
-        # Critical: Primary targets for privilege escalation
+        description="Lista de miembros directos de un grupo"
+        # Examples: ["CORP\\alice", "CORP\\bob", "CORP\\svc_sql"]
+        # Source: AD member attribute
+        # Used for: Group membership enumeration
     )
-    service_accounts: Optional[list[str]] = Field(
+    LinkedGroupPolicyObjects: Optional[list[str]] = Field(
         default=None,
-        description="Service account names"
-        # Examples: ["svc_sql", "apache", "jenkins", "CORP\\svc_backup"]
-        # Source: Process lists, service configurations
-        # Risk: Often have weak passwords or excessive permissions
+        description="GPOs asociadas o vinculadas al objeto"
+        # Examples: ["LDAP://CN={31B2F340-016D-11D2-945F-00C04FB984F9},CN=Policies,CN=System,DC=corp,DC=local"]
+        # Source: GPO link queries
+        # Impact: Determines applied policies
     )
-    mfa_enabled: Optional[bool] = Field(
-        None,
-        description="Multi-factor authentication enabled"
-        # Values: True (MFA enforced), False (password only)
-        # Source: IAM policies, authentication logs
-        # Impact: MFA absence = easier credential-based attacks
+    gPLink: Optional[list[str]] = Field(
+        default=None,
+        description="Enlaces de políticas aplicados a una unidad organizativa (OU)"
+        # Examples: ["[LDAP://CN={A1B2C3D4-1111-2222-3333-444455556666},CN=Policies,CN=System,DC=corp,DC=local;0]"]
+        # Source: OU gPLink attribute
+        # Used for: GPO application order analysis
     )
-    password_policy: Optional[str] = Field(
+    owner: Optional[str] = Field(
         None,
-        description="Password policy strength (e.g., Weak, Strong, Complex, None)"
-        # Examples: "Complex (14+ chars, special chars)", "Weak (no requirements)", "None"
-        # Source: GPO, /etc/security/pwquality.conf, PAM configuration
-        # Impact: Weak policies enable brute force and password spray attacks
+        description="Propietario del objeto o política"
+        # Examples: "CORP\\Domain Admins", "CORP\\jdoe"
+        # Source: Security descriptor owner field
+        # Risk: Owner has full control over object
+    )
+    ManagedBy: Optional[str] = Field(
+        None,
+        description="Objeto o cuenta que administra la OU o GPO"
+        # Examples: "CN=OU-Admins,OU=Groups,DC=corp,DC=local"
+        # Source: AD managedBy attribute
     )
     
     # =============================================================================
     # CATEGORY 7: SOFTWARE & APPLICATIONS
     # =============================================================================
-    # Installed software inventory - each application is a potential attack vector.
-    # Development tools and databases are particularly high-value targets.
+    # Configuración de GPO y aplicaciones
     
-    installed_software: Optional[list[str]] = Field(
-        default=None,
-        description="Installed applications and tools"
-        # Examples: ["Microsoft Office 2019", "Adobe Reader DC", "7-Zip 19.00"]
-        # Source: SCCM, package managers (apt, yum, chocolatey), WMI queries
-        # Used for: Identifying vulnerable software versions
+    DisplayName: Optional[str] = Field(
+        None,
+        description="Nombre descriptivo de la GPO"
+        # Examples: "Default Domain Policy", "Workstation Security Policy"
+        # Source: GPO displayName attribute
     )
-    browser_extensions: Optional[list[str]] = Field(
+    computer: Optional[list[str]] = Field(
         default=None,
-        description="Browser extensions (potential attack vector)"
-        # Examples: ["LastPass 4.82.0", "Grammarly", "uBlock Origin"]
-        # Source: Browser policy queries, user profiles
-        # Risk: Malicious or vulnerable extensions enable browser-based attacks
+        description="Secciones de configuración de equipo dentro de la GPO"
+        # Examples: ["Scripts", "Security", "Registry"]
+        # Source: GPO computer configuration sections
     )
-    database_software: Optional[list[str]] = Field(
+    user: Optional[list[str]] = Field(
         default=None,
-        description="Database systems installed"
-        # Examples: ["MySQL 5.7.33", "PostgreSQL 13.2", "MongoDB 4.4.6", "Redis 6.2.1"]
-        # Source: Process lists, service enumeration
-        # Critical: Databases often contain sensitive data and have default credentials
+        description="Secciones de configuración de usuario dentro de la GPO"
+        # Examples: ["Scripts", "Preferences", "Folders"]
+        # Source: GPO user configuration sections
     )
-    development_tools: Optional[list[str]] = Field(
-        default=None,
-        description="Development tools (Git, Docker, Jenkins, etc.)"
-        # Examples: ["Docker 20.10.12", "Jenkins 2.346.1", "Git 2.34.1", "kubectl 1.23.5"]
-        # Source: Command availability checks, process lists
-        # High-risk: Dev tools often have admin access and weak security configs
+    path: Optional[str] = Field(
+        None,
+        description="Ruta completa LDAP del objeto"
+        # Examples: "CN={31B2F340-016D-11D2-945F-00C04FB984F9},CN=Policies,CN=System,DC=corp,DC=local"
+        # Source: LDAP distinguished name path
     )
     
     # =============================================================================
     # CATEGORY 8: PATCH & VULNERABILITY MANAGEMENT
     # =============================================================================
-    # Patch status and vulnerability metrics - directly indicates exploitability.
-    # Missing patches and high CVSS scores correlate with successful attacks.
+    # Estado de parches y versiones (referenciado anteriormente)
     
-    patch_level: Optional[str] = Field(
-        None,
-        description="Patch status (e.g., Up-to-date, Outdated, Critical gaps)"
-        # Examples: "Up-to-date", "Missing critical patches from last 6 months", "Never patched"
-        # Source: WSUS, SCCM, apt/yum update checks
-        # Impact: Outdated systems = known exploits available
-    )
-    missing_patches: Optional[list[str]] = Field(
-        default=None,
-        description="Specific missing patches or KB IDs"
-        # Examples: ["KB5012345", "MS17-010 (EternalBlue)", "CVE-2023-12345 patch"]
-        # Source: Vulnerability scanners, patch management systems
-        # Critical: Identifies specific exploitable gaps
-    )
-    os_end_of_life: Optional[bool] = Field(
-        None,
-        description="Whether OS is end-of-life/unsupported"
-        # Values: True (Windows 7, Ubuntu 16.04), False (current support)
-        # Source: OS version cross-reference with vendor support dates
-        # Impact: EOL systems = no security updates = guaranteed vulnerabilities
-    )
-    vulnerability_score: Optional[float] = Field(
-        None,
-        description="CVSS or VPR risk score"
-        # Examples: 9.8 (critical), 7.5 (high), 4.3 (medium)
-        # Source: Vulnerability scanners (CVSS v3, Tenable VPR)
-        # Range: 0.0-10.0 (higher = more severe)
-    )
-    critical_vuln_count: Optional[int] = Field(
-        None,
-        description="Number of critical vulnerabilities"
-        # Examples: 0 (clean), 5 (concerning), 25 (severe exposure)
-        # Source: Vulnerability scanner aggregation
-        # Impact: High count = multiple exploitation paths available
-    )
+    # Note: OperatingSystemHotfix, SysvolVersion, and DSVersion are already
+    # defined in CATEGORY 1: CORE SYSTEM INFO
     
     # =============================================================================
     # CATEGORY 9: CONFIGURATION & COMPLIANCE
     # =============================================================================
-    # Security misconfigurations and compliance issues - often easier to exploit
-    # than CVE vulnerabilities. Configuration errors are extremely common.
+    # Estado de GPO y configuración de compliance
     
-    configurations: Optional[list[str]] = Field(
-        default=None,
-        description="Misconfigurations or security weaknesses"
-        # Examples: ["Docker socket exposed on 0.0.0.0:2375", "SSH allows root login",
-        #           "Jenkins /script endpoint without auth", "Default credentials"]
-        # Source: Configuration audits, security baselines (CIS, STIG)
-        # Critical: Misconfigurations often enable direct exploitation
+    GpoStatus: Optional[str] = Field(
+        None,
+        description="Estado de la GPO en el dominio"
+        # Examples: "AllSettingsEnabled", "UserSettingsDisabled", "ComputerSettingsDisabled", "AllSettingsDisabled"
+        # Source: GPO status attribute
     )
-    compliance_gaps: Optional[list[str]] = Field(
-        default=None,
-        description="Compliance violations (PCI-DSS, HIPAA, SOC2, etc.)"
-        # Examples: ["PCI-DSS: No audit logging", "HIPAA: Unencrypted PHI storage",
-        #           "SOC2: No MFA for admin access"]
-        # Source: Compliance scanners, audit reports
-        # Impact: Gaps indicate security control failures
-    )
-    security_recommendations: Optional[list[str]] = Field(
-        default=None,
-        description="Recommended security improvements"
-        # Examples: ["Enable MFA for all admin accounts", "Segment database network",
-        #           "Remove exposed Docker API", "Update to latest OS version"]
-        # Source: Vulnerability scanner output, security assessments
-        # Used for: Understanding known weaknesses and required fixes
-    )
+    # Note: Enabled, WmiFilter, and nTSecurityDescriptor are already defined
+    # in CATEGORY 5: SECURITY CONTROLS
     
     # =============================================================================
     # CATEGORY 10: ASSET CONTEXT & RISK
     # =============================================================================
-    # Business context and criticality - determines attack motivation and impact.
-    # High-value assets are prioritized targets for advanced adversaries.
+    # Contexto de riesgo del activo
     
-    asset_criticality: Optional[str] = Field(
+    lastLogonTimestamp: Optional[int] = Field(
         None,
-        description="Business criticality (Critical, High, Medium, Low)"
-        # Examples: "Critical" (payment system), "High" (customer database),
-        #           "Medium" (web server), "Low" (test environment)
-        # Source: CMDB, business impact analysis
-        # Impact: Higher criticality = more targeted attacks, higher risk tolerance
+        description="Timestamp del último inicio de sesión"
+        # Examples: 133358290010000000 (Windows FILETIME format)
+        # Source: AD lastLogonTimestamp attribute
+        # Used for: Identifying stale accounts
     )
-    business_role: Optional[str] = Field(
-        None,
-        description="Asset function (e.g., Web Server, Database, Workstation, Domain Controller)"
-        # Examples: "Web Server", "Domain Controller", "Database Server",
-        #           "File Server", "VPN Gateway", "Executive Workstation"
-        # Source: CMDB, asset inventory
-        # Used for: Understanding attack value and lateral movement pivots
-    )
-    data_classification: Optional[str] = Field(
-        None,
-        description="Data sensitivity (Public, Internal, Confidential, Restricted)"
-        # Examples: "Restricted" (PII, PHI, PCI), "Confidential" (trade secrets),
-        #           "Internal" (business docs), "Public" (marketing materials)
-        # Source: Data governance policies, DLP tools
-        # Impact: Sensitive data = more sophisticated attacks, compliance requirements
-    )
-    environment: Optional[str] = Field(
-        None,
-        description="Environment type (Production, Staging, Development, Test)"
-        # Examples: "Production", "Staging", "Development", "Test", "UAT"
-        # Source: CMDB, network design documentation
-        # Impact: Prod = critical attacks, Dev/Test = lower priority but easier access
-    )
+    # Note: MemberOf and adminCount are already defined in other categories
     
     # =============================================================================
     # CATEGORY 11: CLOUD & CONTAINERS
     # =============================================================================
-    # Cloud and container-specific context - modern infrastructure attack vectors.
-    # Cloud IAM and container escapes are common advanced attack techniques.
+    # Reservado para futura integración con entornos cloud
     
-    cloud_provider: Optional[str] = Field(
-        None,
-        description="Cloud provider (AWS, Azure, GCP, None)"
-        # Examples: "AWS", "Azure", "GCP", "DigitalOcean", "None" (on-prem)
-        # Source: Cloud inventory APIs, instance metadata
-        # Impact: Each cloud has unique attack paths (IAM, metadata service, etc.)
-    )
-    cloud_instance_type: Optional[str] = Field(
-        None,
-        description="Cloud instance type (e.g., t2.micro, m5.large)"
-        # Examples: "t2.micro", "m5.large", "Standard_D2s_v3", "n1-standard-1"
-        # Source: Cloud instance metadata
-        # Used for: Understanding compute resources and instance profile access
-    )
-    cloud_iam_roles: Optional[list[str]] = Field(
-        default=None,
-        description="Cloud IAM roles and permissions"
-        # Examples: ["arn:aws:iam::123456789:role/EC2-S3-FullAccess",
-        #           "roles/storage.admin", "Contributor"]
-        # Source: Cloud IAM APIs, instance metadata
-        # Critical: Overly permissive roles enable privilege escalation to cloud resources
-    )
-    container_runtime: Optional[str] = Field(
-        None,
-        description="Container runtime (Docker, containerd, CRI-O)"
-        # Examples: "Docker 20.10.12", "containerd 1.6.2", "CRI-O 1.23.1"
-        # Source: Process lists, service enumeration
-        # Risk: Container runtime vulnerabilities enable container escape
-    )
-    kubernetes_cluster: Optional[str] = Field(
-        None,
-        description="Kubernetes cluster name"
-        # Examples: "prod-cluster-us-east", "dev-k8s", "eks-production"
-        # Source: kubectl config, kubelet API
-        # Impact: K8s access enables lateral movement across all cluster workloads
-    )
+    # No parameters currently defined for this category
     
     # =============================================================================
     # CATEGORY 12: BACKUP & STORAGE
     # =============================================================================
-    # Backup configuration - both a recovery mechanism and potential attack target.
-    # Attackers often target backups to prevent recovery from ransomware.
+    # Control de versiones y rutas de almacenamiento
     
-    backup_system: Optional[str] = Field(
+    # Note: SysvolVersion already defined in CATEGORY 1
+    Path: Optional[str] = Field(
         None,
-        description="Backup solution in use"
-        # Examples: "Veeam Backup & Replication 11", "AWS Backup", "rsync to NAS",
-        #           "Acronis Cyber Backup", "No backup configured"
-        # Source: Backup software inventory, scheduled tasks
-        # Risk: Backup systems often have broad file access permissions
-    )
-    backup_location: Optional[str] = Field(
-        None,
-        description="Backup storage location"
-        # Examples: "\\\\nas01\\backups", "s3://company-backups", "/mnt/backup-nas",
-        #           "Azure Blob Storage", "Local disk (D:\\Backups)"
-        # Source: Backup software configuration
-        # Impact: Accessible backups can be encrypted by ransomware
+        description="Ruta UNC completa donde se almacenan las políticas o configuraciones"
+        # Examples: "\\\\corp.local\\SYSVOL\\corp.local\\Policies\\{31B2F340-016D-11D2-945F-00C04FB984F9}"
+        # Source: SYSVOL path queries
+        # Used for: Policy file location and replication monitoring
     )
     
     # =============================================================================
     # CATEGORY 13: THREAT INTELLIGENCE
     # =============================================================================
-    # Threat intelligence context - links host to known threats and exploits.
-    # Presence of IOCs or known exploits indicates active targeting.
+    # Indicadores de riesgo de seguridad y delegación
     
-    threat_intel_matches: Optional[list[str]] = Field(
-        default=None,
-        description="Known IOCs or threat intelligence matches"
-        # Examples: ["IP 203.0.113.42 matches APT29 C2 server",
-        #           "File hash matches Cobalt Strike beacon",
-        #           "Domain contacted known phishing infrastructure"]
-        # Source: Threat intel feeds (AlienVault, ThreatConnect, MISP)
-        # Critical: IOC matches indicate potential compromise
-    )
-    known_exploits: Optional[list[str]] = Field(
-        default=None,
-        description="Known exploit frameworks applicable to this host"
-        # Examples: ["Metasploit module: exploit/windows/smb/ms17_010_eternalblue",
-        #           "Public exploit available for CVE-2023-12345",
-        #           "Weaponized in ransomware campaigns"]
-        # Source: Exploit-DB, Metasploit, vulnerability intelligence
-        # Impact: Known exploits = low skill barrier for attacks
-    )
+    # Note: TrustedForDelegation, TrustedToAuthForDelegation, TGTDelegation,
+    # SelectiveAuthentication, and SIDFilteringForestAware are already defined
+    # in previous categories (NETWORK & SERVICES and NETWORK CONTEXT)
     
     # =============================================================================
     # Pydantic Configuration
@@ -578,58 +507,63 @@ class InputHost(BaseModel):
         - API documentation and integration guides
         
         This example demonstrates:
-        - A realistic production web server scenario
-        - Multiple vulnerabilities and misconfigurations
-        - Mix of high-risk parameters (internet-exposed, missing patches, weak security)
+        - A realistic Active Directory Domain Controller scenario
+        - Multiple security configurations and delegations
+        - Mix of privileged account settings
         - Comprehensive coverage of different parameter categories
         
         The example is designed to generate an interesting attack path that includes:
-        - Initial access via vulnerable services
-        - Privilege escalation through misconfigurations
-        - Lateral movement potential through Docker/Jenkins
-        - Data access via MySQL with default credentials
+        - Kerberos delegation abuse
+        - Privilege escalation through group membership
+        - GPO-based lateral movement
+        - Trust relationship exploitation
         """
         json_schema_extra = {
             "example": {
-                "platform": "Linux",
-                "version_os": "Ubuntu 20.04.3 LTS",
-                "asset_name": "web-prod-01",
-                "fqdn": "web-prod-01.corp.example.com",
-                "ip_addresses": ["10.0.1.50", "203.0.113.42"],
-                "network_segment": "DMZ",
-                "internet_exposed": True,
-                "open_ports": [22, 80, 443, 3306, 2375],
-                "services": [
-                    "OpenSSH 8.2p1 on port 22",
-                    "Apache httpd 2.4.41 on port 80",
-                    "Apache httpd 2.4.41 (SSL) on port 443",
-                    "MySQL 5.7.33 on port 3306",
-                    "Docker API on port 2375 (unauthenticated)"
+                "OperatingSystem": "Windows Server 2019 Standard",
+                "OperatingSystemVersion": "10.0.17763",
+                "OperatingSystemServicePack": "",
+                "OperatingSystemHotfix": ["KB5023696", "KB5037764", "KB5038142"],
+                "SysvolVersion": 655,
+                "DSVersion": 655,
+                "DNSHostName": "dc01.corp.local",
+                "IPv4Address": "10.0.10.50",
+                "ServicePrincipalNames": [
+                    "ldap/dc01.corp.local",
+                    "ldap/dc01",
+                    "ldap/dc01.corp.local/corp.local"
                 ],
-                "vulnerabilities": [
-                    "CVE-2023-12345: SQL Injection in web application",
-                    "CVE-2023-23456: Outdated SSH version",
-                    "CVE-2023-34567: MySQL with default credentials"
+                "TrustedForDelegation": True,
+                "TrustedToAuthForDelegation": False,
+                "TGTDelegation": True,
+                "SamAccountName": "administrator",
+                "DistinguishedName": "CN=Administrator,CN=Users,DC=corp,DC=local",
+                "Name": "Administrator",
+                "objectSid": "S-1-5-21-3623811015-3361044348-30300820-500",
+                "DomainName": "corp.local",
+                "Target": "child.corp.local",
+                "Source": "corp.local",
+                "Direction": "BiDirectional",
+                "TrustType": "ParentChild",
+                "ForestTransitive": True,
+                "IntraForest": True,
+                "SelectiveAuthentication": False,
+                "SIDFilteringForestAware": True,
+                "Enabled": True,
+                "adminCount": 1,
+                "PasswordNeverExpires": True,
+                "ProtectedFromAccidentalDeletion": True,
+                "MemberOf": [
+                    "CN=Domain Admins,CN=Users,DC=corp,DC=local",
+                    "CN=Administrators,CN=Builtin,DC=corp,DC=local"
                 ],
-                "security_controls": [
-                    "CrowdStrike Falcon EDR - Active",
-                    "pfSense Firewall - Permissive ruleset"
+                "LinkedGroupPolicyObjects": [
+                    "LDAP://CN={31B2F340-016D-11D2-945F-00C04FB984F9},CN=Policies,CN=System,DC=corp,DC=local"
                 ],
-                "domain_membership": "corp.example.com",
-                "admin_accounts": ["root", "dbadmin"],
-                "installed_software": [
-                    "Docker 20.10.12",
-                    "Jenkins 2.346.1",
-                    "Git 2.34.1"
-                ],
-                "patch_level": "Missing critical kernel patches from last 6 months",
-                "asset_criticality": "High",
-                "business_role": "Production Web Server",
-                "environment": "Production",
-                "configurations": [
-                    "Docker socket exposed on 0.0.0.0:2375",
-                    "Jenkins running without authentication on /script endpoint"
-                ],
-                "mfa_enabled": False
+                "owner": "CORP\\Domain Admins",
+                "DisplayName": "Default Domain Controllers Policy",
+                "GpoStatus": "AllSettingsEnabled",
+                "lastLogonTimestamp": 133358290010000000,
+                "Path": "\\\\corp.local\\SYSVOL\\corp.local\\Policies\\{31B2F340-016D-11D2-945F-00C04FB984F9}"
             }
         }
